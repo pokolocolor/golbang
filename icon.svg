@@ -1,0 +1,29 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#3f705c"/>
+      <stop offset="100%" stop-color="#17352f"/>
+    </linearGradient>
+    <linearGradient id="accent" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#ffd48d"/>
+      <stop offset="100%" stop-color="#ffc46d"/>
+    </linearGradient>
+  </defs>
+
+  <rect width="512" height="512" rx="110" fill="url(#bg)"/>
+
+  <circle cx="256" cy="282" r="128" fill="#27493e" opacity="0.55"/>
+  <ellipse cx="256" cy="354" rx="164" ry="58" fill="#69b578"/>
+
+  <rect x="250" y="108" width="12" height="186" rx="6" fill="#f6fbf8"/>
+  <path d="M262 116 L372 154 L262 192 Z" fill="url(#accent)"/>
+
+  <circle cx="256" cy="338" r="32" fill="#ffffff"/>
+  <circle cx="244" cy="327" r="4" fill="#dbe3e5"/>
+  <circle cx="266" cy="326" r="4" fill="#dbe3e5"/>
+  <circle cx="237" cy="343" r="4" fill="#dbe3e5"/>
+  <circle cx="258" cy="349" r="4" fill="#dbe3e5"/>
+  <circle cx="274" cy="342" r="4" fill="#dbe3e5"/>
+
+  <text x="256" y="452" text-anchor="middle" font-size="58" font-weight="800" fill="#fff4dc" font-family="Apple SD Gothic Neo, Pretendard, Noto Sans KR, sans-serif">골방</text>
+</svg>
