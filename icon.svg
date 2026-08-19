@@ -24,6 +24,4 @@
   <circle cx="237" cy="343" r="4" fill="#dbe3e5"/>
   <circle cx="258" cy="349" r="4" fill="#dbe3e5"/>
   <circle cx="274" cy="342" r="4" fill="#dbe3e5"/>
-
-  <text x="256" y="452" text-anchor="middle" font-size="58" font-weight="800" fill="#fff4dc" font-family="Apple SD Gothic Neo, Pretendard, Noto Sans KR, sans-serif">골방</text>
 </svg>
