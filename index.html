@@ -1,0 +1,130 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, minimum-scale=1, user-scalable=no, viewport-fit=cover">
+  <meta name="description" content="스크린 골프 모임용 방배정 랜덤 추첨기 및 핸디 균형 배정 페이지">
+  <meta name="theme-color" content="#0e2a2c">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="골프 방배정">
+  <title>스크린 골프 방배정</title>
+  <link rel="stylesheet" href="style.css?v=1">
+</head>
+<body>
+
+  <main class="app-shell">
+    <section class="hero">
+      <div class="hero-actions">
+        <button class="hero-btn" id="helpBtn" type="button">사용방법</button>
+        <button class="hero-btn" id="resetBtn" type="button"><span>↻</span>초기화</button>
+      </div>
+      <div class="hero-badge">⛳ SCREEN GOLF ROOM DRAW</div>
+      <h1>스크린 골프 <em>방배정</em></h1>
+      <p>모임에 맞게 간편하게 등록하고, 랜덤 또는 핸디 기준으로 방을 나눠보세요.</p>
+    </section>
+
+    <section class="card" id="roomsCard">
+      <div class="card-title">
+        <span class="title-icon">🏌️</span>
+        <strong>방 등록</strong>
+        <span class="count" id="roomCount">0개</span>
+      </div>
+      <div class="input-row">
+        <input id="roomInput" type="tel" inputmode="numeric" pattern="[0-9]*" placeholder="방 번호 (예: 1, 2)" maxlength="4" autocomplete="off" aria-label="방 번호">
+        <button class="add-btn" id="addRoomBtn" type="button">추가</button>
+      </div>
+      <label class="toggle-row">
+        <input id="leftRoomToggle" type="checkbox">
+        <span class="switch"></span>
+        좌타방으로 설정
+      </label>
+      <div class="empty" id="roomEmpty">등록된 방이 없습니다</div>
+      <div class="chips" id="roomList"></div>
+    </section>
+
+    <section class="card" id="peopleCard">
+      <div class="card-title">
+        <span class="title-icon">👥</span>
+        <strong>참석자 등록</strong>
+        <span class="count" id="personCount">0명</span>
+      </div>
+      <div class="input-row attendee-input-row">
+        <input id="personInput" type="text" placeholder="이름 입력" maxlength="20" autocomplete="off" enterkeyhint="next">
+        <button type="button" id="personHandicapBtn" class="handicap-picker-btn">
+          <span id="personHandicapBtnLabel">핸디</span>
+        </button>
+        <button class="add-btn" id="addPersonBtn" type="button">추가</button>
+      </div>
+      <label class="toggle-row">
+        <input id="leftPersonToggle" type="checkbox">
+        <span class="switch"></span>
+        좌타로 등록
+      </label>
+      <div class="empty" id="personEmpty">등록된 참석자가 없습니다</div>
+      <div class="chips" id="personList"></div>
+    </section>
+
+    <section class="card database-card" id="databaseCard">
+      <div class="card-title">
+        <span class="title-icon">🗂️</span>
+        <strong>참가자 데이터베이스</strong>
+        <span class="count" id="databaseCount">0명</span>
+      </div>
+      <p class="db-guide">
+        참가자 DB에는 <b>이름, 핸디, 좌타 여부</b>가 저장되며, <b>이 기기의 브라우저</b>에 로컬로 보관됩니다.
+        한 번 등록한 참가자는 다음 모임에서도 목록에 남아있어 눌러서 바로 등록할 수 있습니다.
+      </p>
+      <div class="database-list" id="databaseList"></div>
+      <div class="db-empty" id="databaseEmpty">아직 저장된 참가자가 없습니다.</div>
+      <button class="db-clear-btn" id="clearDatabaseBtn" type="button">참가자 DB 전체 삭제</button>
+    </section>
+
+    <div class="draw-btn-group">
+      <button class="draw-btn draw-btn-random" id="drawRandomBtn" type="button"><span>🎲</span> 랜덤 방배정</button>
+      <button class="draw-btn draw-btn-handicap" id="drawHandicapBtn" type="button"><span>⚖️</span> 핸디 균형 배정</button>
+    </div>
+
+    <p class="hint">
+      <b>랜덤 방배정</b>은 모든 방이 반드시 <b>2명 또는 3명</b>으로 배정되며, 좌타 참석자는 좌타방에 우선 배정됩니다.
+      <b>핸디 균형 배정</b>은 참석자 수를 방 개수로 나눠 각 방 인원이 최대한 균등(최대 1명 차이)하게 배정되며,
+      좌타 참석자는 좌타방에 우선 배치되고, 나머지 참석자는 핸디가 낮은 순부터 각 방에 고르게 분산되어
+      방별 실력 평균이 균형을 이루도록 배정합니다.
+    </p>
+
+    <section class="result" id="result" aria-live="polite"></section>
+
+    <footer>스크린 골프 모임을 위한 간편 방배정 도구</footer>
+  </main>
+
+  <dialog id="helpDialog">
+    <div class="dialog-inner">
+      <button class="close" id="closeHelp" aria-label="닫기">×</button>
+      <h3>사용 방법</h3>
+      <ol>
+        <li>방 번호를 입력하면 모바일에서는 숫자 키패드가 표시됩니다.</li>
+        <li>방은 등록 후 <b>“1번 방”</b>처럼 표시되며, 좌타방으로 설정할 수 있습니다.</li>
+        <li>참석자는 이름을 입력하고 핸디 버튼을 눌러 팝업에서 값을 선택합니다(−25 ~ 40). 좌타라면 토글을 켜서 등록합니다. 핸디는 필수 선택값입니다.</li>
+        <li>처음 등록한 참석자는 이름·핸디 정보가 참가자 DB에 저장되어 다음 모임에서도 목록에서 바로 선택할 수 있습니다.</li>
+        <li>방배정은 <b>🎲 랜덤 방배정</b>과 <b>⚖️ 핸디 균형 배정</b> 중 원하는 버튼을 눌러 진행할 수 있습니다.</li>
+        <li>랜덤 방배정은 방 수와 참석자 수가 맞아야 하며, 모든 방에 2~3명이 배정되고 좌타 참석자는 좌타방에 우선 배정됩니다.</li>
+        <li>핸디 균형 배정은 참석자 수를 방 개수로 나눠 각 방 인원이 최대한 균등하게 배정되며, 좌타 참석자를 좌타방에 우선 배치한 뒤 나머지 참석자들을 핸디 순으로 고르게 분산시켜 방별 실력이 최대한 균형을 이루도록 자동 배정합니다.</li>
+        <li>좌타 참석자가 있는데 좌타방이 등록되어 있지 않으면, 두 배정 방식 모두 결과 화면 상단에 안내 문구가 표시됩니다.</li>
+        <li>방 목록과 배정 결과 모두 <b>방 번호 오름차순</b>으로 표시됩니다.</li>
+      </ol>
+      <p>참가자 DB는 <b>이 브라우저(기기)</b>에만 저장됩니다. 다른 기기와는 공유되지 않습니다.</p>
+    </div>
+  </dialog>
+
+  <dialog id="handicapDialog">
+    <div class="dialog-inner handicap-dialog-inner">
+      <button class="close" id="closeHandicapDialog" aria-label="닫기">×</button>
+      <h3>핸디 선택</h3>
+      <div class="handicap-grid" id="handicapGrid"></div>
+    </div>
+  </dialog>
+
+  <div class="toast" id="toast" role="status"></div>
+  <script src="app.js?v=1"></script>
+</body>
+</html>
