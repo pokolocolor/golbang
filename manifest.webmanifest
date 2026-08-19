@@ -1,0 +1,19 @@
+{
+  "name": "스크린골프 방배정 앱",
+  "short_name": "골방",
+  "description": "골방 · 스크린골프 모임용 방배정 및 핸디 균형 배정 도구",
+  "lang": "ko",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#17352f",
+  "theme_color": "#17352f",
+  "icons": [
+    {
+      "src": "./icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml"
+    }
+  ]
+}
