@@ -12,7 +12,7 @@
     name="description"
     content="스크린골프 모임을 위한 방배정 앱 골방. 방 등록, 참석자 등록, 랜덤 배정, 핸디 균형 배정을 간편하게 사용할 수 있습니다."
   />
-  <meta name="theme-color" content="#0f2a43" />
+  <meta name="theme-color" content="#1c0f2e" />
 
   <link rel="manifest" href="./manifest.webmanifest" />
   <link rel="icon" href="./icon.svg" type="image/svg+xml" />
@@ -23,134 +23,148 @@
 </head>
 <body>
   <div class="app-shell">
-    <header class="hero">
-      <div class="hero-badge">SCREEN GOLF ROOM DRAW</div>
-      <h1 class="hero-title">골방</h1>
-      <p class="hero-desc">
-        스크린골프 모임을 더 편하게.  
-        방 등록과 참석자 등록 후 랜덤 또는 핸디 균형 배정을 바로 진행하세요.
-      </p>
+    <header class="top-hero">
+      <div class="top-actions">
+        <button type="button" class="ghost-pill">사용방법</button>
+        <button type="button" class="ghost-pill">홈화면 추가</button>
+      </div>
 
-      <div class="hero-stats">
-        <div class="hero-stat">
-          <span class="hero-stat-label">등록된 방</span>
-          <strong id="roomCount">0</strong>
-        </div>
-        <div class="hero-stat">
-          <span class="hero-stat-label">등록된 참석자</span>
-          <strong id="peopleCount">0</strong>
-        </div>
+      <div class="brand-wrap">
+        <div class="brand-badge">골방</div>
+        <h1>스크린 골프 방배정</h1>
+        <p>좋은 사람, 좋은 샷, 좋은 하루</p>
       </div>
     </header>
 
-    <main class="main-grid">
-      <section class="panel">
-        <div class="panel-head">
-          <h2>🏌️ 방 등록</h2>
-          <p>방 이름 또는 번호를 입력하고 필요하면 좌타방으로 표시하세요.</p>
+    <main class="mobile-stack">
+      <!-- 방 등록 -->
+      <section class="mobile-card">
+        <div class="section-head">
+          <div class="section-title">
+            <span class="section-icon">🏌️</span>
+            <h2>방 등록</h2>
+          </div>
+          <span class="count-badge" id="roomCountBadge">0개</span>
         </div>
 
-        <div class="form-grid">
-          <div class="field">
-            <label for="roomName">방 이름 / 번호</label>
-            <input
-              id="roomName"
-              type="text"
-              placeholder="예: 1, A, VIP"
-              autocomplete="off"
-            />
-          </div>
+        <div class="inline-form room-form">
+          <input
+            id="roomName"
+            type="text"
+            placeholder="방 번호 (예: 1, 2)"
+            autocomplete="off"
+          />
+          <button id="addRoomBtn" class="primary-add-btn" type="button">추가</button>
+        </div>
 
-          <label class="check-field">
+        <label class="toggle-row" for="roomLeft">
+          <span class="switch">
             <input id="roomLeft" type="checkbox" />
-            <span>좌타방</span>
-          </label>
+            <span class="slider"></span>
+          </span>
+          <span class="toggle-label">좌타방으로 설정</span>
+        </label>
 
-          <button id="addRoomBtn" class="primary-btn" type="button">
-            + 방 등록
-          </button>
+        <div id="roomList" class="chip-list"></div>
+      </section>
+
+      <!-- 참석자 등록 -->
+      <section class="mobile-card">
+        <div class="section-head">
+          <div class="section-title">
+            <span class="section-icon">👥</span>
+            <h2>참석자 등록</h2>
+          </div>
+          <span class="count-badge" id="peopleCountBadge">0명</span>
         </div>
 
-        <div class="list-wrap">
-          <div class="list-head">
-            <h3>등록된 방 목록</h3>
+        <div class="inline-form people-form">
+          <input
+            id="personName"
+            type="text"
+            placeholder="이름 입력"
+            autocomplete="off"
+          />
+          <input
+            id="personHandicap"
+            type="number"
+            inputmode="numeric"
+            placeholder="핸디"
+          />
+          <button id="addPersonBtn" class="primary-add-btn" type="button">추가</button>
+        </div>
+
+        <label class="toggle-row" for="personLeft">
+          <span class="switch">
+            <input id="personLeft" type="checkbox" />
+            <span class="slider"></span>
+          </span>
+          <span class="toggle-label">좌타로 등록</span>
+        </label>
+
+        <button type="button" class="ghost-block-btn" disabled>
+          📷 캡처 이미지로 일괄 등록 (베타)
+        </button>
+
+        <div id="peoplePreviewList" class="chip-list people-chips"></div>
+      </section>
+
+      <!-- 참가자 DB -->
+      <section class="mobile-card">
+        <div class="section-head">
+          <div class="section-title">
+            <span class="section-icon">🗂️</span>
+            <h2>참가자 데이터베이스</h2>
           </div>
-          <div id="roomList" class="list-box"></div>
+          <span class="count-badge" id="dbCountBadge">0명</span>
+        </div>
+
+        <p class="section-desc">
+          참가자 DB에는 이름, 핸디, 좌타 여부가 저장되며, 이 기기의 브라우저에 로컬로 보관됩니다.
+          한 번 등록한 참가자는 다음 모임에서도 목록에 남아 있어 바로 등록할 수 있습니다.
+        </p>
+
+        <div id="peopleList" class="db-list"></div>
+
+        <button id="clearPeopleDbBtn" type="button" class="outline-wide-btn">
+          참가자 DB 전체 삭제
+        </button>
+      </section>
+
+      <!-- 배정 실행 -->
+      <section class="mobile-card">
+        <div class="section-head">
+          <div class="section-title">
+            <span class="section-icon">🎯</span>
+            <h2>방배정 실행</h2>
+          </div>
+        </div>
+
+        <div class="action-grid">
+          <button id="drawRandomBtn" class="action-btn random" type="button">
+            🎲 랜덤 방배정
+          </button>
+          <button id="drawHandicapBtn" class="action-btn handicap" type="button">
+            ⚖️ 핸디 균형 배정
+          </button>
+          <button id="resetBtn" class="action-btn reset" type="button">
+            🗑 전체 초기화
+          </button>
         </div>
       </section>
 
-      <section class="panel">
-        <div class="panel-head">
-          <h2>👥 참석자 등록</h2>
-          <p>이름과 핸디를 입력하고 좌타 여부를 선택하세요.</p>
+      <!-- 결과 -->
+      <section class="mobile-card" id="resultSection">
+        <div class="section-head">
+          <div class="section-title">
+            <span class="section-icon">📋</span>
+            <h2>배정 결과</h2>
+          </div>
         </div>
 
-        <div class="form-grid">
-          <div class="field">
-            <label for="personName">참석자 이름</label>
-            <input
-              id="personName"
-              type="text"
-              placeholder="예: 홍길동"
-              autocomplete="off"
-            />
-          </div>
-
-          <div class="field">
-            <label for="personHandicap">핸디</label>
-            <input
-              id="personHandicap"
-              type="number"
-              inputmode="numeric"
-              placeholder="예: 12"
-            />
-          </div>
-
-          <label class="check-field">
-            <input id="personLeft" type="checkbox" />
-            <span>좌타</span>
-          </label>
-
-          <button id="addPersonBtn" class="primary-btn" type="button">
-            + 참석자 등록
-          </button>
-        </div>
-
-        <div class="list-wrap">
-          <div class="list-head">
-            <h3>등록된 참석자 목록</h3>
-          </div>
-          <div id="peopleList" class="list-box"></div>
-        </div>
+        <div id="result" class="result-area"></div>
       </section>
     </main>
-
-    <section class="action-panel">
-      <div class="panel-head">
-        <h2>🎯 방배정 실행</h2>
-        <p>원하는 방식으로 배정을 진행해보세요.</p>
-      </div>
-
-      <div class="action-buttons">
-        <button id="drawRandomBtn" class="action-btn random" type="button">
-          🎲 랜덤 방배정
-        </button>
-        <button id="drawHandicapBtn" class="action-btn handicap" type="button">
-          ⚖️ 핸디 균형 배정
-        </button>
-        <button id="resetBtn" class="action-btn reset" type="button">
-          🗑 전체 초기화
-        </button>
-      </div>
-    </section>
-
-    <section class="result-section">
-      <div class="panel-head">
-        <h2>📋 배정 결과</h2>
-        <p>배정 결과가 아래에 순차적으로 표시됩니다.</p>
-      </div>
-      <div id="result"></div>
-    </section>
   </div>
 </body>
 </html>
