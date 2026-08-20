@@ -51,6 +51,18 @@ function alertUser(message) {
   window.alert(message);
 }
 
+function setText(id, text) {
+  const el = $(id);
+  if (el) el.textContent = text;
+}
+
+function scrollToResult() {
+  const el = $('resultSection');
+  if (el) {
+    el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }
+}
+
 function resetButtons() {
   const randomBtn = $('drawRandomBtn');
   const handicapBtn = $('drawHandicapBtn');
@@ -120,11 +132,9 @@ function leftRoomWarningHTML() {
 }
 
 function updateStats() {
-  const roomCount = $('roomCount');
-  const peopleCount = $('peopleCount');
-
-  if (roomCount) roomCount.textContent = rooms.length;
-  if (peopleCount) peopleCount.textContent = people.length;
+  setText('roomCountBadge', `${rooms.length}개`);
+  setText('peopleCountBadge', `${people.length}명`);
+  setText('dbCountBadge', `${people.length}명`);
 }
 
 function renderRooms() {
@@ -132,20 +142,18 @@ function renderRooms() {
   if (!el) return;
 
   if (!rooms.length) {
-    el.innerHTML = `<div class="empty">아직 등록된 방이 없습니다.</div>`;
+    el.innerHTML = `<div class="empty-inline">아직 등록된 방이 없습니다.</div>`;
     updateStats();
     return;
   }
 
   el.innerHTML = rooms.map((room, idx) => `
-    <div class="item-card">
-      <div class="item-main">
-        <div class="item-title">
-          <b>${esc(room.name)}번 방</b>
-          ${room.left ? '<span class="tag left-room">좌타방</span>' : '<span class="tag">일반</span>'}
-        </div>
+    <div class="chip-item">
+      <div class="chip-main">
+        <span class="chip-name">${esc(room.name)}번 방</span>
+        ${room.left ? '<span class="mini-badge left-room">좌타</span>' : ''}
       </div>
-      <button class="delete-btn" data-room-index="${idx}" type="button">삭제</button>
+      <button class="chip-x" data-room-index="${idx}" type="button" aria-label="삭제">×</button>
     </div>
   `).join('');
 
@@ -156,33 +164,62 @@ function renderRooms() {
   updateStats();
 }
 
-function renderPeople() {
-  const el = $('peopleList');
+function renderPeoplePreview() {
+  const el = $('peoplePreviewList');
   if (!el) return;
 
   if (!people.length) {
-    el.innerHTML = `<div class="empty">아직 등록된 참석자가 없습니다.</div>`;
-    updateStats();
+    el.innerHTML = `<div class="empty-inline">아직 등록된 참석자가 없습니다.</div>`;
     return;
   }
 
   el.innerHTML = people.map((person, idx) => `
-    <div class="item-card">
-      <div class="item-main">
-        <div class="item-title">
-          <b>${esc(person.name)}</b>
-          ${person.left ? '<span class="tag left-room">좌타</span>' : ''}
-        </div>
-        <div class="item-sub">핸디 ${person.handicap}</div>
+    <div class="chip-item">
+      <div class="chip-main">
+        <span class="chip-name">${esc(person.name)}</span>
+        <span class="mini-badge handi">HDCP ${person.handicap}</span>
+        ${person.left ? '<span class="mini-badge left-room">좌타</span>' : ''}
       </div>
-      <button class="delete-btn" data-person-index="${idx}" type="button">삭제</button>
+      <button class="chip-x" data-person-preview-index="${idx}" type="button" aria-label="삭제">×</button>
+    </div>
+  `).join('');
+
+  el.querySelectorAll('[data-person-preview-index]').forEach(btn => {
+    btn.addEventListener('click', () => removePerson(Number(btn.dataset.personPreviewIndex)));
+  });
+}
+
+function renderPeopleDatabase() {
+  const el = $('peopleList');
+  if (!el) return;
+
+  if (!people.length) {
+    el.innerHTML = `<div class="db-empty">저장된 참가자 데이터가 없습니다.</div>`;
+    return;
+  }
+
+  el.innerHTML = people.map((person, idx) => `
+    <div class="db-row">
+      <div class="db-card">
+        <div class="db-main">
+          <span class="db-name">${esc(person.name)}</span>
+          <span class="mini-badge handi">HDCP ${person.handicap}</span>
+          ${person.left ? '<span class="mini-badge left-room">좌타</span>' : ''}
+        </div>
+        <span class="db-state">등록됨</span>
+      </div>
+      <button class="db-del" data-person-index="${idx}" type="button" aria-label="삭제">×</button>
     </div>
   `).join('');
 
   el.querySelectorAll('[data-person-index]').forEach(btn => {
     btn.addEventListener('click', () => removePerson(Number(btn.dataset.personIndex)));
   });
+}
 
+function renderPeople() {
+  renderPeoplePreview();
+  renderPeopleDatabase();
   updateStats();
 }
 
@@ -261,6 +298,22 @@ function removePerson(index) {
   renderPeople();
 }
 
+function clearPeopleDatabase() {
+  if (isBusy) return;
+  if (!people.length) return;
+
+  const ok = confirm('참가자 DB를 모두 삭제할까요?');
+  if (!ok) return;
+
+  people = [];
+  save(STORAGE.people, people);
+
+  const result = $('result');
+  if (result) result.innerHTML = '';
+
+  renderPeople();
+}
+
 function clearAllData() {
   if (isBusy) return;
 
@@ -297,6 +350,7 @@ function drawRandom() {
 
   isBusy = true;
   setButtonsBusy('<span class="calc-spin">🎲</span> 골방이 셔플 중...', 'random');
+  scrollToResult();
 
   const shuffledRooms = shuffle(rooms).map(r => ({ ...r }));
   const shuffledPeople = shuffle(people).map(p => ({ ...p }));
@@ -324,15 +378,13 @@ function animateRandomAssignments(groups) {
 
       ${warningHTML}
 
-      <div class="assignment" id="assignmentArea">
+      <div class="assignment">
         <div id="revealedList"></div>
         <div id="currentRoomSlot"></div>
         <div id="pendingList"></div>
       </div>
     </div>
   `;
-
-  $('result').scrollIntoView({ behavior: 'smooth', block: 'center' });
 
   const shuffleDurationPerRoom = 2000;
   const shuffleInterval = 100;
@@ -426,7 +478,6 @@ function animateRandomAssignments(groups) {
     $('progressLabel').textContent = `${allPeople.length}명 · ${totalRooms}개 방`;
     resetButtons();
     isBusy = false;
-    $('result').scrollIntoView({ behavior: 'smooth', block: 'center' });
   }
 
   startRoom();
@@ -569,15 +620,13 @@ function animateHandicapAssignments(groups) {
         <div class="overview-item"><span>전체 평균 핸디</span><b>${totalAvg.toFixed(2)}</b></div>
       </div>
 
-      <div class="assignment" id="assignmentArea">
+      <div class="assignment">
         <div id="revealedList"></div>
         <div id="currentRoomSlot"></div>
         <div id="pendingList"></div>
       </div>
     </div>
   `;
-
-  $('result').scrollIntoView({ behavior: 'smooth', block: 'center' });
 
   const shuffleDurationPerRoom = 2000;
   const shuffleInterval = 100;
@@ -659,7 +708,6 @@ function animateHandicapAssignments(groups) {
     $('progressLabel').textContent = `${allPeople.length}명 · ${totalRooms}개 방`;
     resetButtons();
     isBusy = false;
-    $('result').scrollIntoView({ behavior: 'smooth', block: 'center' });
   }
 
   startRoom();
@@ -683,6 +731,7 @@ function drawHandicap() {
 
   isBusy = true;
   setButtonsBusy('<span class="calc-spin">⚖️</span> 골방이 계산 중...', 'handicap');
+  scrollToResult();
 
   const entries = people.map(p => ({
     name: p.name,
@@ -700,6 +749,7 @@ function bindEvents() {
   $('drawRandomBtn')?.addEventListener('click', drawRandom);
   $('drawHandicapBtn')?.addEventListener('click', drawHandicap);
   $('resetBtn')?.addEventListener('click', clearAllData);
+  $('clearPeopleDbBtn')?.addEventListener('click', clearPeopleDatabase);
 
   $('roomName')?.addEventListener('keydown', e => {
     if (e.key === 'Enter') addRoom();
