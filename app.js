@@ -13,6 +13,10 @@
   let selectedHandicap = null;
   let deferredInstallPrompt = null;
 
+  let isBusy = false;
+  let drawRandomBtnHTML = '';
+  let drawHandicapBtnHTML = '';
+
   function readJSON(key, fallback = []) {
     try {
       const value = JSON.parse(localStorage.getItem(key) || 'null');
@@ -25,13 +29,11 @@
   function normalizePeople(list) {
     const map = new Map();
     (Array.isArray(list) ? list : []).forEach(p => {
-      if (p && typeof p === 'object') {
-        const name = String(p.name || '').trim();
-        const handicap = Number(p.handicap);
-        if (name && Number.isFinite(handicap)) {
-          map.set(name, { name, left: !!p.left, handicap });
-        }
-      }
+      if (!p || typeof p !== 'object') return;
+      const name = String(p.name || '').trim();
+      const handicap = Number(p.handicap);
+      if (!name || !Number.isFinite(handicap)) return;
+      map.set(name, { name, left: !!p.left, handicap });
     });
     return [...map.values()].sort((a, b) => a.name.localeCompare(b.name, 'ko'));
   }
@@ -41,7 +43,8 @@
   }
 
   function compareRooms(a, b) {
-    const na = roomNumber(a), nb = roomNumber(b);
+    const na = roomNumber(a);
+    const nb = roomNumber(b);
     if (Number.isFinite(na) && Number.isFinite(nb)) return na - nb;
     if (Number.isFinite(na)) return -1;
     if (Number.isFinite(nb)) return 1;
@@ -54,7 +57,8 @@
       const name = typeof r === 'string'
         ? r.replace(/\D/g, '')
         : String(r?.name || '').replace(/\D/g, '');
-      if (name) map.set(name, { name, left: !!r?.left });
+      if (!name) return;
+      map.set(name, { name, left: !!r?.left });
     });
     return [...map.values()].sort(compareRooms);
   }
@@ -101,6 +105,15 @@
     return `<small class="handi-tag">HDCP ${h}</small>`;
   }
 
+  function shuffle(array) {
+    const a = array.slice();
+    for (let i = a.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [a[i], a[j]] = [a[j], a[i]];
+    }
+    return a;
+  }
+
   function buildHandicapGrid() {
     const grid = $('handicapGrid');
     grid.innerHTML = '';
@@ -135,6 +148,7 @@
     $('roomCount').textContent = `${rooms.length}개`;
     $('personCount').textContent = `${people.length}명`;
     $('databaseCount').textContent = `${participantDB.length}명`;
+
     $('roomEmpty').style.display = rooms.length ? 'none' : 'block';
     $('personEmpty').style.display = people.length ? 'none' : 'block';
     $('databaseEmpty').style.display = participantDB.length ? 'none' : 'block';
@@ -161,7 +175,11 @@
       const selected = currentNames.has(p.name);
       return `
         <div class="db-row">
-          <button type="button" class="db-person-btn ${selected ? 'selected' : ''}" onclick="addPersonFromDB(${i})" ${selected ? 'disabled' : ''}>
+          <button
+            type="button"
+            class="db-person-btn ${selected ? 'selected' : ''}"
+            onclick="addPersonFromDB(${i})"
+            ${selected ? 'disabled' : ''}>
             <span class="db-name">${esc(p.name)}</span>
             ${handiTag(p.handicap)}
             ${leftTag(p.left)}
@@ -176,6 +194,7 @@
   function addRoom() {
     const raw = $('roomInput').value.trim();
     const name = raw.replace(/\D/g, '').replace(/^0+(?=\d)/, '');
+
     if (!name) {
       alertUser('방 번호를 숫자로 입력해주세요.');
       $('roomInput').focus();
@@ -185,10 +204,12 @@
       alertUser(`${name}번 방은 이미 등록되어 있어요.`);
       return;
     }
+
     rooms.push({ name, left: $('leftRoomToggle').checked });
     rooms = normalizeRooms(rooms);
     $('roomInput').value = '';
     $('leftRoomToggle').checked = false;
+
     saveCurrent();
     render();
     $('roomInput').focus();
@@ -221,9 +242,11 @@
 
     people.push({ name, left, handicap });
     participantDB = normalizePeople([...participantDB, { name, left, handicap }]);
+
     saveCurrent();
     saveDatabaseLocal();
     render();
+
     toast(`${name}${left ? ' (좌타)' : ''} · 핸디 ${handicap} 등록 완료`);
     return true;
   }
@@ -243,13 +266,16 @@
   function addPersonFromDB(index) {
     const entry = participantDB[index];
     if (!entry) return;
+
     if (people.some(p => p.name === entry.name)) {
       alertUser(`${entry.name}님은 이미 이번 모임에 등록되어 있어요.`);
       return;
     }
+
     people.push({ name: entry.name, left: entry.left, handicap: entry.handicap });
     saveCurrent();
     render();
+
     toast(`${entry.name}${entry.left ? ' (좌타)' : ''} · 핸디 ${entry.handicap} 등록 완료`);
   }
 
@@ -278,15 +304,6 @@
     participantDB.splice(i, 1);
     saveDatabaseLocal();
     render();
-  }
-
-  function shuffle(array) {
-    const a = array.slice();
-    for (let i = a.length - 1; i > 0; i--) {
-      const j = Math.floor(Math.random() * (i + 1));
-      [a[i], a[j]] = [a[j], a[i]];
-    }
-    return a;
   }
 
   function leftRoomWarningHTML() {
@@ -340,6 +357,7 @@
   function validateForDraw() {
     const roomCount = rooms.length;
     const personCount = people.length;
+
     if (!roomCount) {
       alertUser('방이 아직 등록되지 않았어요.\n먼저 방을 등록해주세요.');
       return false;
@@ -348,6 +366,7 @@
       alertUser('참석자가 아직 등록되지 않았어요.\n먼저 참석자를 등록해주세요.');
       return false;
     }
+
     const minPeople = roomCount * 2;
     const maxPeople = roomCount * 3;
 
@@ -359,18 +378,17 @@
       alertUser(`방이 부족해요.\n\n현재: ${personCount}명\n수용 가능: 최대 ${maxPeople}명\n방 ${roomCount}개 × 최대 3명\n\n방을 추가하거나 참석자를 줄여주세요.`);
       return false;
     }
+
     return true;
   }
-
-  let isBusy = false;
-  let drawRandomBtnHTML = '';
-  let drawHandicapBtnHTML = '';
 
   function setButtonsBusy(activeHTML, which) {
     const r = $('drawRandomBtn');
     const h = $('drawHandicapBtn');
+
     r.disabled = true;
     h.disabled = true;
+
     if (which === 'random') {
       r.innerHTML = activeHTML;
       r.classList.add('drawing');
@@ -383,6 +401,7 @@
   function resetButtons() {
     const r = $('drawRandomBtn');
     const h = $('drawHandicapBtn');
+
     r.disabled = false;
     h.disabled = false;
     r.classList.remove('drawing');
@@ -391,31 +410,30 @@
     h.innerHTML = drawHandicapBtnHTML;
   }
 
-  function draw() {
-    if (isBusy) return;
-    if (!validateForDraw()) return;
-
-    const groups = buildAssignments();
-    if (!groups.every(g => g.people.length >= 2 && g.people.length <= 3)) {
-      alertUser('방배정 조건을 만족하는 결과를 만들지 못했어요. 다시 시도해주세요.');
-      return;
-    }
-
-    groups.sort((a, b) => compareRooms(a.room, b.room));
-
-    isBusy = true;
-    setButtonsBusy('<span class="dice-spin">🎲</span> 골방이 배정 중...', 'random');
-
+  function animateAssignments({
+    groups,
+    headHTML,
+    finishTitle,
+    warningHTML = '',
+    extraHTML = '',
+    previewTitle,
+    previewStatus,
+    pendingLabel = '🏌️ 대기 중...',
+    getPreviewPool,
+    renderPreviewChip,
+    renderFinalCard,
+    finishCountText
+  }) {
     const totalRooms = groups.length;
-    const warningHTML = leftRoomWarningHTML();
 
     $('result').innerHTML = `
       <div class="result-card">
         <div class="result-head">
-          <strong>🎲 골방이 방배정 중이에요...</strong>
+          <strong>${headHTML}</strong>
           <span id="progressLabel">0/${totalRooms}개 방 완료</span>
         </div>
         ${warningHTML}
+        ${extraHTML}
         <div class="assignment" id="assignmentArea">
           <div id="revealedList"></div>
           <div id="currentRoomSlot"></div>
@@ -437,7 +455,7 @@
       const pendingCount = Math.max(0, totalRooms - roomIndex - 1);
       $('pendingList').innerHTML = Array.from({ length: pendingCount }).map(() => `
         <div class="room-result pending-room">
-          <div class="room-result-title"><b>🏌️ 대기 중...</b></div>
+          <div class="room-result-title"><b>${pendingLabel}</b></div>
         </div>
       `).join('');
     }
@@ -449,22 +467,27 @@
       }
 
       const currentGroup = groups[roomIndex];
-      const pool = people.filter(p => !revealedNames.has(p.name));
+      const previewPool = getPreviewPool(revealedNames, currentGroup);
 
       $('currentRoomSlot').innerHTML = `
         <div class="room-result shuffling-room">
-          <div class="room-result-title"><b>🏌️ ${esc(currentGroup.room.name)}번 방</b><span>배정 중...</span></div>
+          <div class="room-result-title">
+            <b>${previewTitle(currentGroup)}</b>
+            <span>${previewStatus(currentGroup)}</span>
+          </div>
           <div class="result-people" id="shuffleChips"></div>
         </div>
       `;
+
       renderPending();
 
       let elapsed = 0;
       const chipsEl = $('shuffleChips');
 
       function tick() {
-        const previewPeople = shuffle(pool).slice(0, currentGroup.people.length);
-        chipsEl.innerHTML = previewPeople.map(p => `<span class="person shuffle-chip">${esc(p.name)}</span>`).join('');
+        const previewPeople = shuffle(previewPool).slice(0, currentGroup.people.length);
+        chipsEl.innerHTML = previewPeople.map(renderPreviewChip).join('');
+
         elapsed += shuffleInterval;
         if (elapsed >= shuffleDurationPerRoom) {
           clearInterval(timer);
@@ -473,36 +496,72 @@
       }
 
       tick();
-      var timer = setInterval(tick, shuffleInterval);
+      const timer = setInterval(tick, shuffleInterval);
     }
 
     function finalizeRoom(currentGroup) {
       currentGroup.people.forEach(p => revealedNames.add(p.name));
       $('currentRoomSlot').innerHTML = '';
-
-      $('revealedList').insertAdjacentHTML('beforeend', `
-        <div class="room-result reveal-item-done">
-          <div class="room-result-title"><b>🏌️ ${esc(currentGroup.room.name)}번 방</b><span>${currentGroup.people.length}명${currentGroup.room.left ? ' · 좌타방' : ''}</span></div>
-          <div class="result-people">${currentGroup.people.map(p => `
-            <span class="person${p.left ? ' left' : ''}">${esc(p.name)}${leftTag(p.left)}</span>
-          `).join('')}</div>
-        </div>
-      `);
+      $('revealedList').insertAdjacentHTML('beforeend', renderFinalCard(currentGroup));
 
       roomIndex++;
       $('progressLabel').textContent = `${roomIndex}/${totalRooms}개 방 완료`;
+
       setTimeout(startRoom, pauseBetweenRooms);
     }
 
     function finishAll() {
-      $('result').querySelector('.result-head strong').textContent = '🎉 골방 배정 완료';
-      $('progressLabel').textContent = `${people.length}명 · ${totalRooms}개 방`;
+      $('result').querySelector('.result-head strong').textContent = finishTitle;
+      $('progressLabel').textContent = finishCountText();
       resetButtons();
       isBusy = false;
       $('result').scrollIntoView({ behavior: 'smooth', block: 'center' });
     }
 
     startRoom();
+  }
+
+  function draw() {
+    if (isBusy) return;
+    if (!validateForDraw()) return;
+
+    const groups = buildAssignments();
+    if (!groups.every(g => g.people.length >= 2 && g.people.length <= 3)) {
+      alertUser('방배정 조건을 만족하는 결과를 만들지 못했어요. 다시 시도해주세요.');
+      return;
+    }
+
+    groups.sort((a, b) => compareRooms(a.room, b.room));
+
+    isBusy = true;
+    setButtonsBusy('<span class="dice-spin">🎲</span> 골방이 배정 중...', 'random');
+
+    animateAssignments({
+      groups,
+      headHTML: '🎲 골방이 방배정 중이에요...',
+      finishTitle: '🎉 골방 배정 완료',
+      warningHTML: leftRoomWarningHTML(),
+      extraHTML: '',
+      pendingLabel: '🏌️ 대기 중...',
+      previewTitle: currentGroup => `🏌️ ${esc(currentGroup.room.name)}번 방`,
+      previewStatus: () => '배정 중...',
+      getPreviewPool: revealedNames => people.filter(p => !revealedNames.has(p.name)),
+      renderPreviewChip: p => `<span class="person shuffle-chip">${esc(p.name)}</span>`,
+      renderFinalCard: currentGroup => `
+        <div class="room-result reveal-item-done">
+          <div class="room-result-title">
+            <b>🏌️ ${esc(currentGroup.room.name)}번 방</b>
+            <span>${currentGroup.people.length}명${currentGroup.room.left ? ' · 좌타방' : ''}</span>
+          </div>
+          <div class="result-people">
+            ${currentGroup.people.map(p => `
+              <span class="person${p.left ? ' left' : ''}">${esc(p.name)}${leftTag(p.left)}</span>
+            `).join('')}
+          </div>
+        </div>
+      `,
+      finishCountText: () => `${people.length}명 · ${groups.length}개 방`
+    });
   }
 
   function computeRoomCapacities(totalPeople, roomCount) {
@@ -524,7 +583,7 @@
     available.sort((a, b) => {
       if (a.people.length !== b.people.length) return a.people.length - b.people.length;
       const avgA = a.people.length ? a.sum / a.people.length : 0;
-      const avgB = b.people.length ? b.sum / b.people.length : 0;
+      const avgB = b.people.length ? a.sum / b.people.length : 0;
       return avgB - avgA;
     });
 
@@ -584,7 +643,7 @@
     const allPeople = groups.flatMap(g => g.people);
     const totalSum = allPeople.reduce((sum, p) => sum + p.handicap, 0);
     const totalAvg = allPeople.length ? totalSum / allPeople.length : 0;
-    const maxAvg = Math.max(...groups.map(g => g.avg), 1);
+    const maxAvg = Math.max(1, ...groups.map(g => g.avg));
     return { allPeople, totalSum, totalAvg, maxAvg };
   }
 
@@ -602,7 +661,10 @@
         </div>
         <div class="result-people">
           ${g.people.map(p => `
-            <span class="person${p.left ? ' left' : ''}">${esc(p.name)}${leftTag(p.left)} <small class="handi-badge">핸디 ${p.handicap}</small></span>
+            <span class="person${p.left ? ' left' : ''}">
+              ${esc(p.name)}${leftTag(p.left)}
+              <small class="handi-badge">핸디 ${p.handicap}</small>
+            </span>
           `).join('')}
         </div>
         <div class="handicap-stats">
@@ -615,119 +677,6 @@
         </div>
       </div>
     `;
-  }
-
-  function animateHandicapAssignments(groups) {
-    const { allPeople, totalSum, totalAvg, maxAvg } = summarizeHandicapGroups(groups);
-    const totalRooms = groups.length;
-    const warningHTML = leftRoomWarningHTML();
-
-    $('result').innerHTML = `
-      <div class="result-card">
-        <div class="result-head">
-          <strong><span class="calc-spin">⚖️</span> 골방이 균형 배정 중이에요...</strong>
-          <span id="progressLabel">0/${totalRooms}개 방 완료</span>
-        </div>
-
-        ${warningHTML}
-
-        <div class="handicap-overview">
-          <div class="overview-item"><span>전체 참가자</span><b>${allPeople.length}명</b></div>
-          <div class="overview-item"><span>전체 총합 핸디</span><b>${totalSum}</b></div>
-          <div class="overview-item"><span>전체 평균 핸디</span><b>${totalAvg.toFixed(2)}</b></div>
-        </div>
-
-        <div class="assignment" id="assignmentArea">
-          <div id="revealedList"></div>
-          <div id="currentRoomSlot"></div>
-          <div id="pendingList"></div>
-        </div>
-      </div>
-    `;
-
-    $('result').scrollIntoView({ behavior: 'smooth', block: 'center' });
-
-    const shuffleDurationPerRoom = 2000;
-    const shuffleInterval = 100;
-    const pauseBetweenRooms = 300;
-
-    let roomIndex = 0;
-    const revealedNames = new Set();
-
-    function renderPending() {
-      const pendingCount = Math.max(0, totalRooms - roomIndex - 1);
-      $('pendingList').innerHTML = Array.from({ length: pendingCount }).map(() => `
-        <div class="room-result pending-room">
-          <div class="room-result-title"><b>🏌️ 대기 중...</b></div>
-        </div>
-      `).join('');
-    }
-
-    function startRoom() {
-      if (roomIndex >= totalRooms) {
-        finishAll();
-        return;
-      }
-
-      const currentGroup = groups[roomIndex];
-      const pool = allPeople.filter(p => !revealedNames.has(p.name));
-
-      $('currentRoomSlot').innerHTML = `
-        <div class="room-result shuffling-room">
-          <div class="room-result-title">
-            <b>🏌️ ${esc(currentGroup.room.name)}번 방</b>
-            <span>균형 배정 중...</span>
-          </div>
-          <div class="result-people" id="shuffleChips"></div>
-        </div>
-      `;
-
-      renderPending();
-
-      let elapsed = 0;
-      const chipsEl = $('shuffleChips');
-
-      function tick() {
-        const previewPeople = shuffle(pool).slice(0, currentGroup.people.length);
-        chipsEl.innerHTML = previewPeople.map(p => `
-          <span class="person shuffle-chip">${esc(p.name)}${leftTag(p.left)} <small class="handi-badge">핸디 ${p.handicap}</small></span>
-        `).join('');
-
-        elapsed += shuffleInterval;
-
-        if (elapsed >= shuffleDurationPerRoom) {
-          clearInterval(timer);
-          finalizeRoom(currentGroup);
-        }
-      }
-
-      tick();
-      var timer = setInterval(tick, shuffleInterval);
-    }
-
-    function finalizeRoom(currentGroup) {
-      currentGroup.people.forEach(p => revealedNames.add(p.name));
-      $('currentRoomSlot').innerHTML = '';
-
-      $('revealedList').insertAdjacentHTML(
-        'beforeend',
-        renderHandicapRoomCard(currentGroup, totalAvg, maxAvg)
-      );
-
-      roomIndex++;
-      $('progressLabel').textContent = `${roomIndex}/${totalRooms}개 방 완료`;
-      setTimeout(startRoom, pauseBetweenRooms);
-    }
-
-    function finishAll() {
-      $('result').querySelector('.result-head strong').textContent = '🎉 골방 균형 배정 완료';
-      $('progressLabel').textContent = `${allPeople.length}명 · ${totalRooms}개 방`;
-      resetButtons();
-      isBusy = false;
-      $('result').scrollIntoView({ behavior: 'smooth', block: 'center' });
-    }
-
-    startRoom();
   }
 
   function drawHandicap() {
@@ -749,10 +698,40 @@
     isBusy = true;
     setButtonsBusy('<span class="calc-spin">⚖️</span> 골방이 계산 중...', 'handicap');
 
-    const entries = people.map(p => ({ name: p.name, handicap: p.handicap, left: p.left }));
-    const groups = assignByHandicap(entries, rooms);
+    const entries = people.map(p => ({
+      name: p.name,
+      handicap: p.handicap,
+      left: p.left
+    }));
 
-    animateHandicapAssignments(groups);
+    const groups = assignByHandicap(entries, rooms);
+    const { allPeople, totalSum, totalAvg, maxAvg } = summarizeHandicapGroups(groups);
+
+    animateAssignments({
+      groups,
+      headHTML: '⚖️ 골방이 균형 배정 중이에요...',
+      finishTitle: '🎉 골방 균형 배정 완료',
+      warningHTML: leftRoomWarningHTML(),
+      extraHTML: `
+        <div class="handicap-overview">
+          <div class="overview-item"><span>전체 참가자</span><b>${allPeople.length}명</b></div>
+          <div class="overview-item"><span>전체 총합 핸디</span><b>${totalSum}</b></div>
+          <div class="overview-item"><span>전체 평균 핸디</span><b>${totalAvg.toFixed(2)}</b></div>
+        </div>
+      `,
+      pendingLabel: '🏌️ 대기 중...',
+      previewTitle: currentGroup => `🏌️ ${esc(currentGroup.room.name)}번 방${currentGroup.room.left ? ' · 좌타방' : ''}`,
+      previewStatus: () => '배정 중...',
+      getPreviewPool: revealedNames => allPeople.filter(p => !revealedNames.has(p.name)),
+      renderPreviewChip: p => `
+        <span class="person shuffle-chip">
+          ${esc(p.name)}${leftTag(p.left)}
+          <small class="handi-badge">핸디 ${p.handicap}</small>
+        </span>
+      `,
+      renderFinalCard: currentGroup => renderHandicapRoomCard(currentGroup, totalAvg, maxAvg),
+      finishCountText: () => `${allPeople.length}명 · ${groups.length}개 방`
+    });
   }
 
   function updateInstallButton() {
@@ -782,6 +761,7 @@
     highlightHandicapGrid();
     $('handicapDialog').showModal();
   });
+
   $('closeHandicapDialog').addEventListener('click', () => $('handicapDialog').close());
 
   $('helpBtn').addEventListener('click', () => $('helpDialog').showModal());
@@ -793,6 +773,7 @@
       return;
     }
     if (!window.confirm('저장된 참가자 DB를 모두 삭제할까요?\n현재 모임 참석자는 삭제되지 않습니다.')) return;
+
     participantDB = [];
     saveDatabaseLocal();
     render();
@@ -800,11 +781,13 @@
 
   $('resetBtn').addEventListener('click', () => {
     if (!window.confirm('현재 모임의 방과 참석자를 초기화할까요?\n참가자 DB는 유지됩니다.')) return;
+
     rooms = [];
     people = [];
     saveCurrent();
     $('result').innerHTML = '';
     render();
+
     toast('현재 모임이 초기화되었어요. 참가자 DB는 유지됩니다.');
   });
 
