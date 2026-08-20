@@ -1,839 +1,851 @@
-<script>
-  const $ = id => document.getElementById(id);
+(() => {
+  "use strict";
 
-  const STORAGE = {
-    rooms: 'golbang_rooms_v1',
-    people: 'golbang_people_v1',
-    database: 'golbang_participant_database_v1'
+  /* =========================
+   * 골방 app.js 최종본
+   * - 방 등록 / 참석자 등록
+   * - 랜덤 방배정
+   * - 핸디 균형 배정
+   * - 2초 셔플 애니메이션 + 순차 공개
+   * - localStorage 저장
+   * - PWA 설치 버튼 / SW 등록
+   * ========================= */
+
+  const STORAGE_KEYS = {
+    rooms: "golbang_rooms_v1",
+    attendees: "golbang_attendees_v1"
   };
 
-  let participantDB = normalizePeople(readJSON(STORAGE.database));
-  let rooms = normalizeRooms(readJSON(STORAGE.rooms));
-  let people = normalizePeople(readJSON(STORAGE.people));
-  let selectedHandicap = null;
-  let deferredInstallPrompt = null;
+  let rooms = [];
+  let attendees = [];
+  let deferredPrompt = null;
 
-  let isBusy = false;
-  let drawRandomBtnHTML = '';
-  let drawHandicapBtnHTML = '';
+  let refs = {};
 
-  function readJSON(key, fallback = []) {
-    try {
-      const value = JSON.parse(localStorage.getItem(key) || 'null');
-      return Array.isArray(value) ? value : fallback;
-    } catch {
-      return fallback;
+  /* =========================
+   * 공통 유틸
+   * ========================= */
+
+  function pick(...selectors) {
+    for (const selector of selectors) {
+      const el = document.querySelector(selector);
+      if (el) return el;
     }
+    return null;
   }
 
-  function normalizePeople(list) {
-    const map = new Map();
-    (Array.isArray(list) ? list : []).forEach(p => {
-      if (!p || typeof p !== 'object') return;
-      const name = String(p.name || '').trim();
-      const handicap = Number(p.handicap);
-      if (!name || !Number.isFinite(handicap)) return;
-      map.set(name, { name, left: !!p.left, handicap });
-    });
-    return [...map.values()].sort((a, b) => a.name.localeCompare(b.name, 'ko'));
+  function pickAll(...selectors) {
+    for (const selector of selectors) {
+      const els = document.querySelectorAll(selector);
+      if (els && els.length) return Array.from(els);
+    }
+    return [];
   }
 
-  function roomNumber(room) {
-    return Number.parseInt(String(room?.name ?? '').replace(/\D/g, ''), 10);
+  function escapeHtml(value) {
+    return String(value ?? "")
+      .replaceAll("&", "&amp;")
+      .replaceAll("<", "&lt;")
+      .replaceAll(">", "&gt;")
+      .replaceAll('"', "&quot;")
+      .replaceAll("'", "&#39;");
   }
 
-  function compareRooms(a, b) {
-    const na = roomNumber(a);
-    const nb = roomNumber(b);
-    if (Number.isFinite(na) && Number.isFinite(nb)) return na - nb;
-    if (Number.isFinite(na)) return -1;
-    if (Number.isFinite(nb)) return 1;
-    return String(a?.name || '').localeCompare(String(b?.name || ''), 'ko', { numeric: true });
-  }
-
-  function normalizeRooms(list) {
-    const map = new Map();
-    (Array.isArray(list) ? list : []).forEach(r => {
-      const name = typeof r === 'string'
-        ? r.replace(/\D/g, '')
-        : String(r?.name || '').replace(/\D/g, '');
-      if (!name) return;
-      map.set(name, { name, left: !!r?.left });
-    });
-    return [...map.values()].sort(compareRooms);
-  }
-
-  function saveCurrent() {
-    rooms = normalizeRooms(rooms);
-    people = normalizePeople(people);
-    localStorage.setItem(STORAGE.rooms, JSON.stringify(rooms));
-    localStorage.setItem(STORAGE.people, JSON.stringify(people));
-  }
-
-  function saveDatabaseLocal() {
-    participantDB = normalizePeople(participantDB);
-    localStorage.setItem(STORAGE.database, JSON.stringify(participantDB));
-  }
-
-  function toast(msg) {
-    const el = $('toast');
-    el.textContent = msg;
-    el.classList.add('show');
-    clearTimeout(window.__toast);
-    window.__toast = setTimeout(() => el.classList.remove('show'), 2600);
-  }
-
-  function alertUser(msg) {
-    window.alert(msg);
-  }
-
-  function esc(s) {
-    return String(s).replace(/[&<>'"]/g, c => ({
-      '&': '&amp;',
-      '<': '&lt;',
-      '>': '&gt;',
-      "'": '&#39;',
-      '"': '&quot;'
-    }[c]));
-  }
-
-  function leftTag(isLeft) {
-    return isLeft ? '<small class="left-tag">좌타</small>' : '';
-  }
-
-  function handiTag(h) {
-    return `<small class="handi-tag">HDCP ${h}</small>`;
+  function uid() {
+    if (window.crypto && typeof window.crypto.randomUUID === "function") {
+      return window.crypto.randomUUID();
+    }
+    return `id_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
   }
 
   function shuffle(array) {
-    const a = array.slice();
-    for (let i = a.length - 1; i > 0; i--) {
+    const arr = [...array];
+    for (let i = arr.length - 1; i > 0; i -= 1) {
       const j = Math.floor(Math.random() * (i + 1));
-      [a[i], a[j]] = [a[j], a[i]];
+      [arr[i], arr[j]] = [arr[j], arr[i]];
     }
-    return a;
+    return arr;
   }
 
-  function buildHandicapGrid() {
-    const grid = $('handicapGrid');
-    grid.innerHTML = '';
-    for (let h = 40; h >= -25; h--) {
-      const btn = document.createElement('button');
-      btn.type = 'button';
-      btn.className = 'handicap-grid-btn';
-      btn.textContent = h;
-      btn.dataset.value = h;
-      btn.addEventListener('click', () => {
-        selectedHandicap = h;
-        $('personHandicapBtnLabel').textContent = h;
-        $('personHandicapBtn').classList.add('selected');
-        $('handicapDialog').close();
-        highlightHandicapGrid();
-      });
-      grid.appendChild(btn);
+  function toNumber(value, fallback = 0) {
+    const n = Number(value);
+    return Number.isFinite(n) ? n : fallback;
+  }
+
+  function toBool(value) {
+    return value === true || value === "true" || value === 1 || value === "1";
+  }
+
+  function normalizeRoom(room) {
+    return {
+      id: room?.id || uid(),
+      name: String(room?.name ?? "").trim(),
+      capacity: Math.max(1, parseInt(room?.capacity, 10) || 1),
+      lefty: toBool(room?.lefty ?? room?.isLefty ?? room?.leftHanded ?? false)
+    };
+  }
+
+  function normalizeAttendee(person) {
+    return {
+      id: person?.id || uid(),
+      name: String(person?.name ?? "").trim(),
+      handicap: toNumber(person?.handicap ?? person?.handi ?? person?.score ?? 0, 0),
+      lefty: toBool(person?.lefty ?? person?.isLefty ?? person?.leftHanded ?? false)
+    };
+  }
+
+  function updateWindowState() {
+    window.rooms = rooms;
+    window.attendees = attendees;
+  }
+
+  /* =========================
+   * DOM 참조 캐싱
+   * ========================= */
+
+  function cacheRefs() {
+    refs = {
+      roomForm: pick("#roomForm", "[data-room-form]"),
+      roomNameInput: pick("#roomName", "#roomNameInput", 'input[name="roomName"]'),
+      roomCapacityInput: pick("#roomCapacity", "#roomCapacityInput", 'input[name="roomCapacity"]'),
+      roomLeftyInput: pick("#roomLefty", "#roomIsLefty", "#leftyRoom", 'input[name="roomLefty"]'),
+      addRoomBtn: pick("#addRoomBtn", "#roomAddBtn", "[data-add-room]"),
+      clearRoomsBtn: pick("#clearRoomsBtn", "[data-clear-rooms]"),
+      roomList: pick("#roomList", ".room-list", "[data-room-list]"),
+      roomCount: pick("#roomCount", "[data-room-count]"),
+      totalCapacity: pick("#totalCapacity", "[data-total-capacity]"),
+      leftyRoomCount: pick("#leftyRoomCount", "[data-lefty-room-count]"),
+
+      attendeeForm: pick("#attendeeForm", "[data-attendee-form]"),
+      attendeeNameInput: pick("#attendeeName", "#attendeeNameInput", 'input[name="attendeeName"]'),
+      attendeeHandicapInput: pick("#attendeeHandicap", "#attendeeHandicapInput", 'input[name="attendeeHandicap"]'),
+      attendeeLeftyInput: pick("#attendeeLefty", "#participantLefty", "#leftyAttendee", 'input[name="attendeeLefty"]'),
+      addAttendeeBtn: pick("#addAttendeeBtn", "#participantAddBtn", "[data-add-attendee]"),
+      clearAttendeesBtn: pick("#clearAttendeesBtn", "[data-clear-attendees]"),
+      attendeeList: pick("#attendeeList", ".attendee-list", "[data-attendee-list]"),
+      attendeeCount: pick("#attendeeCount", "[data-attendee-count]"),
+      leftyAttendeeCount: pick("#leftyAttendeeCount", "[data-lefty-attendee-count]"),
+
+      bulkTextarea: pick("#bulkAttendees", "#attendeeBulk", "textarea[data-bulk-attendees]"),
+      bulkAddBtn: pick("#addBulkAttendeesBtn", "[data-add-bulk-attendees]"),
+
+      randomDrawBtn: pick("#randomDrawBtn", "#drawRandomBtn", "[data-draw-random]"),
+      handicapDrawBtn: pick("#handicapDrawBtn", "#drawHandicapBtn", "[data-draw-handicap]"),
+      clearAllBtn: pick("#clearAllBtn", "#resetBtn", "[data-clear-all]"),
+
+      resultSection: pick("#resultSection", ".result-section", "[data-result-section]"),
+      resultSummary: pick("#resultSummary", ".result-summary", "[data-result-summary]"),
+      resultCards: pick("#resultCards", ".result-cards", "[data-result-cards]"),
+
+      installBtn: pick("#installBtn", "[data-install-app]")
+    };
+  }
+
+  /* =========================
+   * 저장 / 불러오기
+   * ========================= */
+
+  function saveState() {
+    localStorage.setItem(STORAGE_KEYS.rooms, JSON.stringify(rooms));
+    localStorage.setItem(STORAGE_KEYS.attendees, JSON.stringify(attendees));
+    updateWindowState();
+  }
+
+  function loadState() {
+    try {
+      const storedRooms = JSON.parse(localStorage.getItem(STORAGE_KEYS.rooms) || "[]");
+      const storedAttendees = JSON.parse(localStorage.getItem(STORAGE_KEYS.attendees) || "[]");
+
+      rooms = Array.isArray(storedRooms) ? storedRooms.map(normalizeRoom) : [];
+      attendees = Array.isArray(storedAttendees) ? storedAttendees.map(normalizeAttendee) : [];
+    } catch (err) {
+      console.error("저장 데이터 로드 실패:", err);
+      rooms = [];
+      attendees = [];
     }
+    updateWindowState();
   }
 
-  function highlightHandicapGrid() {
-    document.querySelectorAll('.handicap-grid-btn').forEach(btn => {
-      btn.classList.toggle('active', Number(btn.dataset.value) === selectedHandicap);
-    });
+  /* =========================
+   * 렌더링
+   * ========================= */
+
+  function clearResults() {
+    if (refs.resultCards) refs.resultCards.innerHTML = "";
+    if (refs.resultSummary) refs.resultSummary.textContent = "";
+    if (refs.resultSection) refs.resultSection.hidden = true;
   }
 
-  function render() {
-    rooms = normalizeRooms(rooms);
-    people = normalizePeople(people);
-    participantDB = normalizePeople(participantDB);
+  function updateStats() {
+    const totalCapacity = rooms.reduce((sum, room) => sum + room.capacity, 0);
+    const leftyRoomCount = rooms.filter(room => room.lefty).length;
+    const leftyAttendeeCount = attendees.filter(person => person.lefty).length;
 
-    $('roomCount').textContent = `${rooms.length}개`;
-    $('personCount').textContent = `${people.length}명`;
-    $('databaseCount').textContent = `${participantDB.length}명`;
+    if (refs.roomCount) refs.roomCount.textContent = String(rooms.length);
+    if (refs.totalCapacity) refs.totalCapacity.textContent = String(totalCapacity);
+    if (refs.leftyRoomCount) refs.leftyRoomCount.textContent = String(leftyRoomCount);
 
-    $('roomEmpty').style.display = rooms.length ? 'none' : 'block';
-    $('personEmpty').style.display = people.length ? 'none' : 'block';
-    $('databaseEmpty').style.display = participantDB.length ? 'none' : 'block';
+    if (refs.attendeeCount) refs.attendeeCount.textContent = String(attendees.length);
+    if (refs.leftyAttendeeCount) refs.leftyAttendeeCount.textContent = String(leftyAttendeeCount);
+  }
 
-    $('roomList').innerHTML = rooms.map((r, i) => `
-      <div class="chip">
-        <span>${esc(r.name)}번 방</span>
-        ${leftTag(r.left)}
-        <button type="button" onclick="removeRoom(${i})" aria-label="${esc(r.name)}번 방 삭제">×</button>
-      </div>
-    `).join('');
+  function renderRooms() {
+    if (!refs.roomList) return;
 
-    $('personList').innerHTML = people.map((p, i) => `
-      <div class="chip">
-        <span>${esc(p.name)}</span>
-        ${handiTag(p.handicap)}
-        ${leftTag(p.left)}
-        <button type="button" onclick="removePerson(${i})" aria-label="${esc(p.name)} 삭제">×</button>
-      </div>
-    `).join('');
-
-    const currentNames = new Set(people.map(p => p.name));
-    $('databaseList').innerHTML = participantDB.map((p, i) => {
-      const selected = currentNames.has(p.name);
-      return `
-        <div class="db-row">
-          <button
-            type="button"
-            class="db-person-btn ${selected ? 'selected' : ''}"
-            onclick="addPersonFromDB(${i})"
-            ${selected ? 'disabled' : ''}>
-            <span class="db-name">${esc(p.name)}</span>
-            ${handiTag(p.handicap)}
-            ${leftTag(p.left)}
-            <span class="db-action">${selected ? '등록됨' : '+ 등록'}</span>
-          </button>
-          <button type="button" class="db-delete" onclick="removeFromDB(${i})" aria-label="${esc(p.name)} DB 삭제">×</button>
+    if (!rooms.length) {
+      refs.roomList.innerHTML = `
+        <div class="empty-state">
+          등록된 방이 없습니다.
         </div>
       `;
-    }).join('');
+      updateStats();
+      return;
+    }
+
+    refs.roomList.innerHTML = rooms.map((room, index) => `
+      <div class="manage-card room-card" data-room-id="${escapeHtml(room.id)}">
+        <div class="manage-card-head">
+          <strong>${escapeHtml(room.name || `방 ${index + 1}`)}</strong>
+          <div class="manage-badges">
+            <span class="badge">${room.capacity}명</span>
+            ${room.lefty ? '<span class="badge lefty">좌타 우선</span>' : ""}
+          </div>
+        </div>
+        <div class="manage-card-actions">
+          <button type="button" class="danger-btn" data-remove-room="${escapeHtml(room.id)}">삭제</button>
+        </div>
+      </div>
+    `).join("");
+
+    updateStats();
   }
+
+  function renderAttendees() {
+    if (!refs.attendeeList) return;
+
+    if (!attendees.length) {
+      refs.attendeeList.innerHTML = `
+        <div class="empty-state">
+          등록된 참석자가 없습니다.
+        </div>
+      `;
+      updateStats();
+      return;
+    }
+
+    refs.attendeeList.innerHTML = attendees.map((person, index) => `
+      <div class="manage-card attendee-card" data-attendee-id="${escapeHtml(person.id)}">
+        <div class="manage-card-head">
+          <strong>${escapeHtml(person.name || `참석자 ${index + 1}`)}</strong>
+          <div class="manage-badges">
+            <span class="badge handi-badge">핸디 ${person.handicap}</span>
+            ${person.lefty ? '<span class="badge lefty">좌타</span>' : ""}
+          </div>
+        </div>
+        <div class="manage-card-actions">
+          <button type="button" class="danger-btn" data-remove-attendee="${escapeHtml(person.id)}">삭제</button>
+        </div>
+      </div>
+    `).join("");
+
+    updateStats();
+  }
+
+  function refreshAll() {
+    renderRooms();
+    renderAttendees();
+    updateStats();
+    saveState();
+  }
+
+  /* =========================
+   * 등록 / 삭제
+   * ========================= */
 
   function addRoom() {
-    const raw = $('roomInput').value.trim();
-    const name = raw.replace(/\D/g, '').replace(/^0+(?=\d)/, '');
+    const name = refs.roomNameInput?.value?.trim() || "";
+    const capacity = parseInt(refs.roomCapacityInput?.value, 10);
+    const lefty = !!refs.roomLeftyInput?.checked;
 
     if (!name) {
-      alertUser('방 번호를 숫자로 입력해주세요.');
-      $('roomInput').focus();
-      return;
-    }
-    if (rooms.some(r => r.name === name)) {
-      alertUser(`${name}번 방은 이미 등록되어 있어요.`);
+      alert("방 이름을 입력해 주세요.");
+      refs.roomNameInput?.focus();
       return;
     }
 
-    rooms.push({ name, left: $('leftRoomToggle').checked });
-    rooms = normalizeRooms(rooms);
-    $('roomInput').value = '';
-    $('leftRoomToggle').checked = false;
+    if (!Number.isInteger(capacity) || capacity <= 0) {
+      alert("방 인원은 1명 이상으로 입력해 주세요.");
+      refs.roomCapacityInput?.focus();
+      return;
+    }
 
-    saveCurrent();
-    render();
-    $('roomInput').focus();
+    rooms.push(normalizeRoom({
+      id: uid(),
+      name,
+      capacity,
+      lefty
+    }));
+
+    if (refs.roomNameInput) refs.roomNameInput.value = "";
+    if (refs.roomCapacityInput) refs.roomCapacityInput.value = "";
+    if (refs.roomLeftyInput) refs.roomLeftyInput.checked = false;
+
+    clearResults();
+    refreshAll();
+    refs.roomNameInput?.focus();
   }
 
-  function addPerson(name, handicapValue) {
-    name = String(name || '').trim();
-    const left = $('leftPersonToggle').checked;
+  function removeRoom(roomId) {
+    rooms = rooms.filter(room => room.id !== roomId);
+    clearResults();
+    refreshAll();
+  }
+
+  function clearRooms() {
+    if (!rooms.length) return;
+    if (!confirm("등록된 방을 모두 삭제할까요?")) return;
+    rooms = [];
+    clearResults();
+    refreshAll();
+  }
+
+  function addAttendee() {
+    const name = refs.attendeeNameInput?.value?.trim() || "";
+    const handicapRaw = refs.attendeeHandicapInput?.value?.trim() || "0";
+    const handicap = toNumber(handicapRaw, 0);
+    const lefty = !!refs.attendeeLeftyInput?.checked;
 
     if (!name) {
-      alertUser('참석자 이름을 입력해주세요.');
-      $('personInput').focus();
-      return false;
+      alert("참석자 이름을 입력해 주세요.");
+      refs.attendeeNameInput?.focus();
+      return;
     }
-    if (people.some(p => p.name === name)) {
-      alertUser(`${name}님은 이미 이번 모임에 등록되어 있어요.`);
-      return false;
+
+    attendees.push(normalizeAttendee({
+      id: uid(),
+      name,
+      handicap,
+      lefty
+    }));
+
+    if (refs.attendeeNameInput) refs.attendeeNameInput.value = "";
+    if (refs.attendeeHandicapInput) refs.attendeeHandicapInput.value = "";
+    if (refs.attendeeLeftyInput) refs.attendeeLeftyInput.checked = false;
+
+    clearResults();
+    refreshAll();
+    refs.attendeeNameInput?.focus();
+  }
+
+  function removeAttendee(attendeeId) {
+    attendees = attendees.filter(person => person.id !== attendeeId);
+    clearResults();
+    refreshAll();
+  }
+
+  function clearAttendees() {
+    if (!attendees.length) return;
+    if (!confirm("등록된 참석자를 모두 삭제할까요?")) return;
+    attendees = [];
+    clearResults();
+    refreshAll();
+  }
+
+  function clearAll() {
+    if (!rooms.length && !attendees.length) return;
+    if (!confirm("방과 참석자 데이터를 모두 삭제할까요?")) return;
+    rooms = [];
+    attendees = [];
+    clearResults();
+    refreshAll();
+  }
+
+  function addBulkAttendees() {
+    const text = refs.bulkTextarea?.value?.trim();
+    if (!text) {
+      alert("일괄 입력할 참석자 목록을 입력해 주세요.");
+      refs.bulkTextarea?.focus();
+      return;
     }
-    if (handicapValue === null || handicapValue === undefined || handicapValue === '') {
-      alertUser('핸디를 선택해주세요.');
-      $('personHandicapBtn').focus();
+
+    const lines = text
+      .split("\n")
+      .map(line => line.trim())
+      .filter(Boolean);
+
+    if (!lines.length) {
+      alert("추가할 데이터가 없습니다.");
+      return;
+    }
+
+    const created = [];
+
+    for (const line of lines) {
+      const parts = line.split(/[,\t/|]/).map(v => v.trim()).filter(Boolean);
+      const name = parts[0] || "";
+      const handicap = toNumber(parts[1] ?? 0, 0);
+      const leftyText = (parts[2] || "").toLowerCase();
+      const lefty = ["좌", "좌타", "left", "lefty", "l", "yes", "y", "1", "true"].includes(leftyText);
+
+      if (!name) continue;
+
+      created.push(normalizeAttendee({
+        id: uid(),
+        name,
+        handicap,
+        lefty
+      }));
+    }
+
+    if (!created.length) {
+      alert("형식을 확인해 주세요. 예: 홍길동, 12, 좌타");
+      return;
+    }
+
+    attendees.push(...created);
+    if (refs.bulkTextarea) refs.bulkTextarea.value = "";
+
+    clearResults();
+    refreshAll();
+  }
+
+  /* =========================
+   * 배정 계산 유틸
+   * ========================= */
+
+  function ensureDrawReady() {
+    if (!rooms.length) {
+      alert("먼저 방을 등록해 주세요.");
       return false;
     }
 
-    const handicap = Number(handicapValue);
-    if (!Number.isFinite(handicap)) {
-      alertUser('핸디 값이 올바르지 않아요. 다시 선택해주세요.');
+    if (!attendees.length) {
+      alert("먼저 참석자를 등록해 주세요.");
       return false;
     }
 
-    people.push({ name, left, handicap });
-    participantDB = normalizePeople([...participantDB, { name, left, handicap }]);
+    const totalCapacity = rooms.reduce((sum, room) => sum + room.capacity, 0);
 
-    saveCurrent();
-    saveDatabaseLocal();
-    render();
+    if (attendees.length > totalCapacity) {
+      alert("참석자가 방 수용 인원을 초과했습니다.");
+      return false;
+    }
 
-    toast(`${name}${left ? ' (좌타)' : ''} · 핸디 ${handicap} 등록 완료`);
     return true;
   }
 
-  function addPersonFromInput() {
-    const name = $('personInput').value.trim();
-    if (addPerson(name, selectedHandicap)) {
-      $('personInput').value = '';
-      selectedHandicap = null;
-      $('personHandicapBtnLabel').textContent = '핸디';
-      $('personHandicapBtn').classList.remove('selected');
-      $('leftPersonToggle').checked = false;
-      $('personInput').focus();
-    }
+  function createAssignmentShell() {
+    return rooms.map((room, index) => ({
+      roomId: room.id,
+      roomName: room.name || `방 ${index + 1}`,
+      capacity: room.capacity,
+      lefty: !!room.lefty,
+      members: []
+    }));
   }
 
-  function addPersonFromDB(index) {
-    const entry = participantDB[index];
-    if (!entry) return;
-
-    if (people.some(p => p.name === entry.name)) {
-      alertUser(`${entry.name}님은 이미 이번 모임에 등록되어 있어요.`);
-      return;
-    }
-
-    people.push({ name: entry.name, left: entry.left, handicap: entry.handicap });
-    saveCurrent();
-    render();
-
-    toast(`${entry.name}${entry.left ? ' (좌타)' : ''} · 핸디 ${entry.handicap} 등록 완료`);
+  function remainingSeats(group) {
+    return group.capacity - group.members.length;
   }
 
-  function removeRoom(i) {
-    const room = rooms[i];
-    if (!room) return;
-    if (!window.confirm(`${room.name}번 방을 삭제할까요?`)) return;
-    rooms.splice(i, 1);
-    saveCurrent();
-    render();
+  function currentTotalHandicap(group) {
+    return group.members.reduce((sum, person) => sum + toNumber(person.handicap, 0), 0);
   }
 
-  function removePerson(i) {
-    const p = people[i];
-    if (!p) return;
-    if (!window.confirm(`${p.name}님을 이번 모임에서 삭제할까요?\n참가자 DB에서는 삭제되지 않습니다.`)) return;
-    people.splice(i, 1);
-    saveCurrent();
-    render();
+  function currentAvgHandicap(group) {
+    return group.members.length ? currentTotalHandicap(group) / group.members.length : 0;
   }
 
-  function removeFromDB(i) {
-    const p = participantDB[i];
-    if (!p) return;
-    if (!window.confirm(`${p.name}님을 참가자 DB에서도 삭제할까요?`)) return;
-    participantDB.splice(i, 1);
-    saveDatabaseLocal();
-    render();
-  }
+  function candidateRoomsForPerson(groups, person) {
+    let available = groups.filter(group => remainingSeats(group) > 0);
+    if (!available.length) return [];
 
-  function leftRoomWarningHTML() {
-    const hasLeftRoom = rooms.some(r => r.left);
-    const hasLeftPeople = people.some(p => p.left);
-    if (hasLeftPeople && !hasLeftRoom) {
-      return '<div class="result-warning">⚠️ 좌타 참석자가 있지만 좌타방이 등록되어 있지 않아, 좌타 여부와 관계없이 배정되었습니다.</div>';
-    }
-    return '';
-  }
-
-  function getGroupSizes(roomCount, personCount) {
-    const min = roomCount * 2;
-    const extra = personCount - min;
-    const sizes = Array(roomCount).fill(2);
-    shuffle(Array.from({ length: roomCount }, (_, i) => i))
-      .slice(0, extra)
-      .forEach(i => { sizes[i] = 3; });
-    return sizes;
-  }
-
-  function buildAssignments() {
-    const shuffledRooms = shuffle(normalizeRooms(rooms));
-    const sizes = getGroupSizes(shuffledRooms.length, people.length);
-    const groups = shuffledRooms.map((room, i) => ({ room, capacity: sizes[i], people: [] }));
-
-    const leftPeople = shuffle(people.filter(p => p.left));
-    const rightPeople = shuffle(people.filter(p => !p.left));
-
-    const leftRoomGroups = shuffle(groups.filter(g => g.room.left));
-    let li = 0;
-
-    leftRoomGroups.forEach(group => {
-      while (group.people.length < group.capacity && li < leftPeople.length) {
-        group.people.push(leftPeople[li++]);
+    if (person.lefty) {
+      const leftyRooms = available.filter(group => group.lefty);
+      if (leftyRooms.length) {
+        available = leftyRooms;
       }
+    }
+
+    return available;
+  }
+
+  function pickRandomRoom(groups, person) {
+    let candidates = candidateRoomsForPerson(groups, person);
+    if (!candidates.length) return null;
+
+    const minFillRatio = Math.min(...candidates.map(group => group.members.length / group.capacity));
+    candidates = candidates.filter(group => (group.members.length / group.capacity) === minFillRatio);
+
+    return candidates[Math.floor(Math.random() * candidates.length)] || null;
+  }
+
+  function pickBalancedRoom(groups, person) {
+    let candidates = candidateRoomsForPerson(groups, person);
+    if (!candidates.length) return null;
+
+    const randomized = shuffle(candidates);
+
+    randomized.sort((a, b) => {
+      const fillA = a.members.length / a.capacity;
+      const fillB = b.members.length / b.capacity;
+      if (fillA !== fillB) return fillA - fillB;
+
+      const totalA = currentTotalHandicap(a);
+      const totalB = currentTotalHandicap(b);
+      if (totalA !== totalB) return totalA - totalB;
+
+      const avgA = currentAvgHandicap(a);
+      const avgB = currentAvgHandicap(b);
+      if (avgA !== avgB) return avgA - avgB;
+
+      return 0;
     });
 
-    const remaining = shuffle([...rightPeople, ...leftPeople.slice(li)]);
-    let cursor = 0;
+    return randomized[0] || null;
+  }
 
-    groups.forEach(group => {
-      while (group.people.length < group.capacity) {
-        group.people.push(remaining[cursor++]);
+  /* =========================
+   * 랜덤 방배정
+   * ========================= */
+
+  function assignRandom() {
+    const groups = createAssignmentShell();
+    const randomPeople = shuffle(attendees);
+
+    for (const person of randomPeople) {
+      const room = pickRandomRoom(groups, person);
+      if (!room) {
+        throw new Error("배정 가능한 방이 없습니다.");
       }
-    });
+      room.members.push(person);
+    }
 
     return groups;
   }
 
-  function validateForDraw() {
-    const roomCount = rooms.length;
-    const personCount = people.length;
+  /* =========================
+   * 핸디 균형 배정
+   * ========================= */
 
-    if (!roomCount) {
-      alertUser('방이 아직 등록되지 않았어요.\n먼저 방을 등록해주세요.');
-      return false;
-    }
-    if (!personCount) {
-      alertUser('참석자가 아직 등록되지 않았어요.\n먼저 참석자를 등록해주세요.');
-      return false;
-    }
+  function assignByHandicap() {
+    const groups = createAssignmentShell();
 
-    const minPeople = roomCount * 2;
-    const maxPeople = roomCount * 3;
+    const sortedPeople = [...attendees].sort((a, b) => {
+      const handiDiff = toNumber(b.handicap, 0) - toNumber(a.handicap, 0);
+      if (handiDiff !== 0) return handiDiff;
+      return a.name.localeCompare(b.name, "ko");
+    });
 
-    if (personCount < minPeople) {
-      alertUser(`참석자가 부족해요.\n\n현재: ${personCount}명\n필요: 최소 ${minPeople}명\n방 ${roomCount}개 × 최소 2명`);
-      return false;
-    }
-    if (personCount > maxPeople) {
-      alertUser(`방이 부족해요.\n\n현재: ${personCount}명\n수용 가능: 최대 ${maxPeople}명\n방 ${roomCount}개 × 최대 3명\n\n방을 추가하거나 참석자를 줄여주세요.`);
-      return false;
-    }
-
-    return true;
-  }
-
-  function setButtonsBusy(activeHTML, which) {
-    const r = $('drawRandomBtn');
-    const h = $('drawHandicapBtn');
-
-    r.disabled = true;
-    h.disabled = true;
-
-    if (which === 'random') {
-      r.innerHTML = activeHTML;
-      r.classList.add('drawing');
-    } else {
-      h.innerHTML = activeHTML;
-      h.classList.add('drawing');
-    }
-  }
-
-  function resetButtons() {
-    const r = $('drawRandomBtn');
-    const h = $('drawHandicapBtn');
-
-    r.disabled = false;
-    h.disabled = false;
-    r.classList.remove('drawing');
-    h.classList.remove('drawing');
-    r.innerHTML = drawRandomBtnHTML;
-    h.innerHTML = drawHandicapBtnHTML;
-  }
-
-  function animateAssignments({
-    groups,
-    headHTML,
-    finishTitle,
-    warningHTML = '',
-    extraHTML = '',
-    previewTitle,
-    previewStatus,
-    pendingLabel = '🏌️ 대기 중...',
-    getPreviewPool,
-    renderPreviewChip,
-    renderFinalCard,
-    finishCountText
-  }) {
-    const totalRooms = groups.length;
-
-    $('result').innerHTML = `
-      <div class="result-card">
-        <div class="result-head">
-          <strong>${headHTML}</strong>
-          <span id="progressLabel">0/${totalRooms}개 방 완료</span>
-        </div>
-        ${warningHTML}
-        ${extraHTML}
-        <div class="assignment" id="assignmentArea">
-          <div id="revealedList"></div>
-          <div id="currentRoomSlot"></div>
-          <div id="pendingList"></div>
-        </div>
-      </div>
-    `;
-
-    $('result').scrollIntoView({ behavior: 'smooth', block: 'center' });
-
-    const shuffleDurationPerRoom = 2000;
-    const shuffleInterval = 100;
-    const pauseBetweenRooms = 300;
-
-    let roomIndex = 0;
-    const revealedNames = new Set();
-
-    function renderPending() {
-      const pendingCount = Math.max(0, totalRooms - roomIndex - 1);
-      $('pendingList').innerHTML = Array.from({ length: pendingCount }).map(() => `
-        <div class="room-result pending-room">
-          <div class="room-result-title"><b>${pendingLabel}</b></div>
-        </div>
-      `).join('');
-    }
-
-    function startRoom() {
-      if (roomIndex >= totalRooms) {
-        finishAll();
-        return;
+    for (const person of sortedPeople) {
+      const room = pickBalancedRoom(groups, person);
+      if (!room) {
+        throw new Error("배정 가능한 방이 없습니다.");
       }
-
-      const currentGroup = groups[roomIndex];
-      const previewPool = getPreviewPool(revealedNames, currentGroup);
-
-      $('currentRoomSlot').innerHTML = `
-        <div class="room-result shuffling-room">
-          <div class="room-result-title">
-            <b>${previewTitle(currentGroup)}</b>
-            <span>${previewStatus(currentGroup)}</span>
-          </div>
-          <div class="result-people" id="shuffleChips"></div>
-        </div>
-      `;
-
-      renderPending();
-
-      let elapsed = 0;
-      const chipsEl = $('shuffleChips');
-
-      function tick() {
-        const previewPeople = shuffle(previewPool).slice(0, currentGroup.people.length);
-        chipsEl.innerHTML = previewPeople.map(renderPreviewChip).join('');
-
-        elapsed += shuffleInterval;
-        if (elapsed >= shuffleDurationPerRoom) {
-          clearInterval(timer);
-          finalizeRoom(currentGroup);
-        }
-      }
-
-      tick();
-      const timer = setInterval(tick, shuffleInterval);
+      room.members.push(person);
     }
 
-    function finalizeRoom(currentGroup) {
-      currentGroup.people.forEach(p => revealedNames.add(p.name));
-      $('currentRoomSlot').innerHTML = '';
-      $('revealedList').insertAdjacentHTML('beforeend', renderFinalCard(currentGroup));
-
-      roomIndex++;
-      $('progressLabel').textContent = `${roomIndex}/${totalRooms}개 방 완료`;
-
-      setTimeout(startRoom, pauseBetweenRooms);
-    }
-
-    function finishAll() {
-      $('result').querySelector('.result-head strong').textContent = finishTitle;
-      $('progressLabel').textContent = finishCountText();
-      resetButtons();
-      isBusy = false;
-      $('result').scrollIntoView({ behavior: 'smooth', block: 'center' });
-    }
-
-    startRoom();
+    return groups;
   }
 
-  function draw() {
-    if (isBusy) return;
-    if (!validateForDraw()) return;
+  /* =========================
+   * 결과 요약
+   * ========================= */
 
-    const groups = buildAssignments();
-    if (!groups.every(g => g.people.length >= 2 && g.people.length <= 3)) {
-      alertUser('방배정 조건을 만족하는 결과를 만들지 못했어요. 다시 시도해주세요.');
-      return;
-    }
-
-    groups.sort((a, b) => compareRooms(a.room, b.room));
-
-    isBusy = true;
-    setButtonsBusy('<span class="dice-spin">🎲</span> 골방이 배정 중...', 'random');
-
-    animateAssignments({
-      groups,
-      headHTML: '🎲 골방이 방배정 중이에요...',
-      finishTitle: '🎉 골방 배정 완료',
-      warningHTML: leftRoomWarningHTML(),
-      extraHTML: '',
-      pendingLabel: '🏌️ 대기 중...',
-      previewTitle: currentGroup => `🏌️ ${esc(currentGroup.room.name)}번 방`,
-      previewStatus: () => '배정 중...',
-      getPreviewPool: revealedNames => people.filter(p => !revealedNames.has(p.name)),
-      renderPreviewChip: p => `<span class="person shuffle-chip">${esc(p.name)}</span>`,
-      renderFinalCard: currentGroup => `
-        <div class="room-result reveal-item-done">
-          <div class="room-result-title">
-            <b>🏌️ ${esc(currentGroup.room.name)}번 방</b>
-            <span>${currentGroup.people.length}명${currentGroup.room.left ? ' · 좌타방' : ''}</span>
-          </div>
-          <div class="result-people">
-            ${currentGroup.people.map(p => `
-              <span class="person${p.left ? ' left' : ''}">${esc(p.name)}${leftTag(p.left)}</span>
-            `).join('')}
-          </div>
-        </div>
-      `,
-      finishCountText: () => `${people.length}명 · ${groups.length}개 방`
-    });
-  }
-
-  function computeRoomCapacities(totalPeople, roomCount) {
-    const base = Math.floor(totalPeople / roomCount);
-    const remainder = totalPeople % roomCount;
-    const capacities = Array(roomCount).fill(base);
-
-    shuffle(Array.from({ length: roomCount }, (_, i) => i))
-      .slice(0, remainder)
-      .forEach(i => { capacities[i] += 1; });
-
-    return capacities;
-  }
-
-  function pickTargetGroup(candidateGroups) {
-    const available = candidateGroups.filter(g => g.people.length < g.capacity);
-    if (!available.length) return null;
-
-    available.sort((a, b) => {
-      if (a.people.length !== b.people.length) return a.people.length - b.people.length;
-      const avgA = a.people.length ? a.sum / a.people.length : 0;
-      const avgB = b.people.length ? a.sum / b.people.length : 0;
-      return avgB - avgA;
-    });
-
-    return available[0];
-  }
-
-  function assignByHandicap(entries, roomList) {
-    const totalPeople = entries.length;
-    const roomCount = roomList.length;
-    const capacities = computeRoomCapacities(totalPeople, roomCount);
-
-    const groups = shuffle(roomList.map(r => ({ ...r }))).map((room, i) => ({
-      room,
-      capacity: capacities[i],
-      people: [],
-      sum: 0
-    }));
-
-    const leftGroups = groups.filter(g => g.room.left);
-    const hasLeftRoom = leftGroups.length > 0;
-
-    const leftPeopleSorted = shuffle(entries.filter(p => p.left)).sort((a, b) => a.handicap - b.handicap);
-    const overflow = [];
-
-    leftPeopleSorted.forEach(person => {
-      const target = hasLeftRoom ? pickTargetGroup(leftGroups) : null;
-      if (target) {
-        target.people.push(person);
-        target.sum += person.handicap;
-      } else {
-        overflow.push(person);
-      }
-    });
-
-    const rightPeople = entries.filter(p => !p.left);
-    const remaining = shuffle([...rightPeople, ...overflow]).sort((a, b) => a.handicap - b.handicap);
-
-    remaining.forEach(person => {
-      const target = pickTargetGroup(groups);
-      if (!target) return;
-      target.people.push(person);
-      target.sum += person.handicap;
-    });
-
-    const result = groups.map(g => ({
-      room: g.room,
-      people: g.people,
-      sum: g.sum,
-      avg: g.people.length ? g.sum / g.people.length : 0
-    }));
-
-    result.sort((a, b) => compareRooms(a.room, b.room));
-    return result;
+  function summarizeRandomGroups(groups) {
+    return groups
+      .map((group, index) => `${group.roomName || `방 ${index + 1}`}: ${group.members.length}명`)
+      .join(" / ");
   }
 
   function summarizeHandicapGroups(groups) {
-    const allPeople = groups.flatMap(g => g.people);
-    const totalSum = allPeople.reduce((sum, p) => sum + p.handicap, 0);
-    const totalAvg = allPeople.length ? totalSum / allPeople.length : 0;
-    const maxAvg = Math.max(1, ...groups.map(g => g.avg));
-    return { allPeople, totalSum, totalAvg, maxAvg };
+    return groups
+      .map((group, index) => {
+        const handicaps = group.members
+          .map(m => toNumber(m.handicap, 0))
+          .filter(v => Number.isFinite(v));
+
+        const sum = handicaps.reduce((a, b) => a + b, 0);
+        const avg = handicaps.length ? (sum / handicaps.length) : 0;
+
+        return `${group.roomName || `방 ${index + 1}`}: ${group.members.length}명 · 평균 핸디 ${avg.toFixed(1)}`;
+      })
+      .join(" / ");
   }
 
-  function renderHandicapRoomCard(g, totalAvg, maxAvg) {
-    const dev = g.avg - totalAvg;
-    const devAbs = Math.abs(dev);
-    const devClass = devAbs < 0.5 ? 'dev-good' : (devAbs < 1.5 ? 'dev-ok' : 'dev-warn');
-    const barPct = maxAvg ? (g.avg / maxAvg) * 100 : 0;
+  /* =========================
+   * 결과 렌더링
+   * ========================= */
+
+  function renderResultRoomCard(roomName, members, revealed, shufflePool, mode) {
+    const safeMembers = Array.isArray(members) ? members : [];
+    const countForShuffle = Math.max(1, safeMembers.length || 4);
+
+    const shownMembers = revealed
+      ? safeMembers
+      : Array.from({ length: countForShuffle }, () => {
+          const picked = shufflePool[Math.floor(Math.random() * shufflePool.length)];
+          return picked || { name: "배정 중...", handicap: "" };
+        });
+
+    const handicaps = safeMembers
+      .map(m => toNumber(m.handicap ?? m.handi ?? m.score ?? 0, 0))
+      .filter(v => Number.isFinite(v));
+
+    const avg = handicaps.length
+      ? (handicaps.reduce((a, b) => a + b, 0) / handicaps.length).toFixed(1)
+      : "0.0";
 
     return `
-      <div class="room-result reveal-item-done handicap-room">
-        <div class="room-result-title">
-          <b>🏌️ ${esc(g.room.name)}번 방${g.room.left ? ' · 좌타방' : ''}</b>
-          <span>${g.people.length}명</span>
+      <div class="result-room-card ${revealed ? "revealed" : "shuffling"}">
+        <div class="result-room-head">
+          <strong>${escapeHtml(roomName)}</strong>
+          <span>${revealed ? (mode === "handicap" ? `평균 핸디 ${avg}` : `${safeMembers.length}명`) : "셔플 중..."}</span>
         </div>
-        <div class="result-people">
-          ${g.people.map(p => `
-            <span class="person${p.left ? ' left' : ''}">
-              ${esc(p.name)}${leftTag(p.left)}
-              <small class="handi-badge">핸디 ${p.handicap}</small>
-            </span>
-          `).join('')}
-        </div>
-        <div class="handicap-stats">
-          <span class="stat-chip">총합 핸디 <b>${g.sum}</b></span>
-          <span class="stat-chip">평균 핸디 <b>${g.avg.toFixed(2)}</b></span>
-          <span class="stat-chip ${devClass}">전체 평균과 편차 ${dev >= 0 ? '+' : ''}${dev.toFixed(2)}</span>
-        </div>
-        <div class="balance-bar-track">
-          <div class="balance-bar-fill" style="width:${barPct}%"></div>
+
+        <div class="result-member-list">
+          ${shownMembers.map(member => {
+            const name = typeof member === "string"
+              ? member
+              : (member.name || "이름없음");
+
+            const handicap = revealed
+              ? (typeof member === "object" ? (member.handicap ?? member.handi ?? member.score ?? "") : "")
+              : "…";
+
+            const lefty = typeof member === "object" && member.lefty;
+
+            return `
+              <div class="result-member-item">
+                <span class="name">${escapeHtml(name)}</span>
+                <span class="meta">
+                  ${revealed && handicap !== "" ? `<span class="handi-badge">${escapeHtml(handicap)}</span>` : ""}
+                  ${revealed && lefty ? `<span class="lefty-badge">좌타</span>` : ""}
+                </span>
+              </div>
+            `;
+          }).join("")}
         </div>
       </div>
     `;
   }
 
-  function drawHandicap() {
-    if (isBusy) return;
+  async function animateAssignments(assignments, mode = "random") {
+    if (!refs.resultCards) return;
 
-    if (!rooms.length) {
-      alertUser('방이 아직 등록되지 않았어요.\n먼저 방을 등록해주세요.');
-      return;
-    }
-    if (!people.length) {
-      alertUser('참석자가 아직 등록되지 않았어요.\n먼저 참석자를 등록해주세요.');
-      return;
-    }
-    if (people.length < rooms.length) {
-      alertUser(`참석자 수가 부족해요.\n\n현재: ${people.length}명\n필요: 최소 ${rooms.length}명 (방 1개당 최소 1명 이상 필요)`);
-      return;
-    }
-
-    isBusy = true;
-    setButtonsBusy('<span class="calc-spin">⚖️</span> 골방이 계산 중...', 'handicap');
-
-    const entries = people.map(p => ({
-      name: p.name,
-      handicap: p.handicap,
-      left: p.left
+    const normalized = assignments.map((group, index) => ({
+      roomName: group.roomName || group.name || `방 ${index + 1}`,
+      members: Array.isArray(group.members) ? group.members : []
     }));
 
-    const groups = assignByHandicap(entries, rooms);
-    const { allPeople, totalSum, totalAvg, maxAvg } = summarizeHandicapGroups(groups);
+    const shufflePool = normalized
+      .flatMap(group => group.members)
+      .map(member => ({
+        name: member.name || "이름없음",
+        handicap: member.handicap ?? member.handi ?? member.score ?? "",
+        lefty: !!member.lefty
+      }));
 
-    animateAssignments({
-      groups,
-      headHTML: '⚖️ 골방이 균형 배정 중이에요...',
-      finishTitle: '🎉 골방 균형 배정 완료',
-      warningHTML: leftRoomWarningHTML(),
-      extraHTML: `
-        <div class="handicap-overview">
-          <div class="overview-item"><span>전체 참가자</span><b>${allPeople.length}명</b></div>
-          <div class="overview-item"><span>전체 총합 핸디</span><b>${totalSum}</b></div>
-          <div class="overview-item"><span>전체 평균 핸디</span><b>${totalAvg.toFixed(2)}</b></div>
-        </div>
-      `,
-      pendingLabel: '🏌️ 대기 중...',
-      previewTitle: currentGroup => `🏌️ ${esc(currentGroup.room.name)}번 방${currentGroup.room.left ? ' · 좌타방' : ''}`,
-      previewStatus: () => '배정 중...',
-      getPreviewPool: revealedNames => allPeople.filter(p => !revealedNames.has(p.name)),
-      renderPreviewChip: p => `
-        <span class="person shuffle-chip">
-          ${esc(p.name)}${leftTag(p.left)}
-          <small class="handi-badge">핸디 ${p.handicap}</small>
-        </span>
-      `,
-      renderFinalCard: currentGroup => renderHandicapRoomCard(currentGroup, totalAvg, maxAvg),
-      finishCountText: () => `${allPeople.length}명 · ${groups.length}개 방`
+    if (refs.resultSection) {
+      refs.resultSection.hidden = false;
+      refs.resultSection.style.display = "";
+    }
+
+    if (refs.resultSummary) {
+      refs.resultSummary.textContent = mode === "handicap"
+        ? "핸디 균형 배정 중..."
+        : "랜덤 방배정 중...";
+    }
+
+    const totalDuration = 2000;
+    const tick = 90;
+    const revealStep = normalized.length ? totalDuration / normalized.length : totalDuration;
+    const startedAt = Date.now();
+
+    await new Promise(resolve => {
+      const timer = setInterval(() => {
+        const elapsed = Date.now() - startedAt;
+        const revealCount = Math.min(
+          normalized.length,
+          Math.floor(elapsed / revealStep)
+        );
+
+        refs.resultCards.innerHTML = normalized.map((group, idx) => {
+          return renderResultRoomCard(
+            group.roomName,
+            group.members,
+            idx < revealCount,
+            shufflePool,
+            mode
+          );
+        }).join("");
+
+        if (elapsed >= totalDuration) {
+          clearInterval(timer);
+
+          refs.resultCards.innerHTML = normalized.map(group => {
+            return renderResultRoomCard(
+              group.roomName,
+              group.members,
+              true,
+              shufflePool,
+              mode
+            );
+          }).join("");
+
+          if (refs.resultSummary) {
+            refs.resultSummary.textContent = mode === "handicap"
+              ? summarizeHandicapGroups(assignments)
+              : summarizeRandomGroups(assignments);
+          }
+
+          resolve();
+        }
+      }, tick);
     });
   }
 
-  function updateInstallButton() {
-    $('installBtn').classList.toggle('hidden', !deferredInstallPrompt);
+  /* =========================
+   * 실행 함수
+   * ========================= */
+
+  async function drawRandom() {
+    if (!ensureDrawReady()) return;
+
+    try {
+      const assignments = assignRandom();
+      await animateAssignments(assignments, "random");
+    } catch (err) {
+      console.error(err);
+      alert("랜덤 방배정 중 오류가 발생했습니다.");
+    }
   }
 
-  $('addRoomBtn').addEventListener('click', addRoom);
-  $('addPersonBtn').addEventListener('click', addPersonFromInput);
-  $('drawRandomBtn').addEventListener('click', draw);
-  $('drawHandicapBtn').addEventListener('click', drawHandicap);
+  async function drawHandicap() {
+    if (!ensureDrawReady()) return;
 
-  $('roomInput').addEventListener('input', e => {
-    e.target.value = e.target.value.replace(/\D/g, '');
-  });
-  $('roomInput').addEventListener('keydown', e => {
-    if (e.key === 'Enter') addRoom();
-  });
-
-  $('personInput').addEventListener('keydown', e => {
-    if (e.key === 'Enter') {
-      highlightHandicapGrid();
-      $('handicapDialog').showModal();
-    }
-  });
-
-  $('personHandicapBtn').addEventListener('click', () => {
-    highlightHandicapGrid();
-    $('handicapDialog').showModal();
-  });
-
-  $('closeHandicapDialog').addEventListener('click', () => $('handicapDialog').close());
-
-  $('helpBtn').addEventListener('click', () => $('helpDialog').showModal());
-  $('closeHelp').addEventListener('click', () => $('helpDialog').close());
-
-  $('clearDatabaseBtn').addEventListener('click', () => {
-    if (!participantDB.length) {
-      alertUser('삭제할 참가자 DB가 없어요.');
-      return;
-    }
-    if (!window.confirm('저장된 참가자 DB를 모두 삭제할까요?\n현재 모임 참석자는 삭제되지 않습니다.')) return;
-
-    participantDB = [];
-    saveDatabaseLocal();
-    render();
-  });
-
-  $('resetBtn').addEventListener('click', () => {
-    if (!window.confirm('현재 모임의 방과 참석자를 초기화할까요?\n참가자 DB는 유지됩니다.')) return;
-
-    rooms = [];
-    people = [];
-    saveCurrent();
-    $('result').innerHTML = '';
-    render();
-
-    toast('현재 모임이 초기화되었어요. 참가자 DB는 유지됩니다.');
-  });
-
-  $('installBtn').addEventListener('click', async () => {
-    if (!deferredInstallPrompt) return;
-    deferredInstallPrompt.prompt();
     try {
-      await deferredInstallPrompt.userChoice;
-    } catch {}
-    deferredInstallPrompt = null;
-    updateInstallButton();
-  });
+      const assignments = assignByHandicap();
+      await animateAssignments(assignments, "handicap");
+    } catch (err) {
+      console.error(err);
+      alert("핸디 균형 배정 중 오류가 발생했습니다.");
+    }
+  }
 
-  window.addEventListener('beforeinstallprompt', e => {
-    e.preventDefault();
-    deferredInstallPrompt = e;
-    updateInstallButton();
-    toast('골방을 이 기기에 앱으로 설치할 수 있어요.');
-  });
+  /* =========================
+   * 이벤트 바인딩
+   * ========================= */
 
-  window.addEventListener('appinstalled', () => {
-    deferredInstallPrompt = null;
-    updateInstallButton();
-    toast('골방 설치가 완료되었어요.');
-  });
+  function bindEvents() {
+    refs.addRoomBtn?.addEventListener("click", addRoom);
+    refs.addAttendeeBtn?.addEventListener("click", addAttendee);
+    refs.bulkAddBtn?.addEventListener("click", addBulkAttendees);
 
-  window.addEventListener('online', () => toast('인터넷에 다시 연결되었어요.'));
-  window.addEventListener('offline', () => toast('오프라인 상태예요. 저장된 기능은 계속 사용할 수 있어요.'));
+    refs.randomDrawBtn?.addEventListener("click", drawRandom);
+    refs.handicapDrawBtn?.addEventListener("click", drawHandicap);
 
-  drawRandomBtnHTML = $('drawRandomBtn').innerHTML;
-  drawHandicapBtnHTML = $('drawHandicapBtn').innerHTML;
+    refs.clearRoomsBtn?.addEventListener("click", clearRooms);
+    refs.clearAttendeesBtn?.addEventListener("click", clearAttendees);
+    refs.clearAllBtn?.addEventListener("click", clearAll);
 
-  buildHandicapGrid();
-  render();
-  updateInstallButton();
+    refs.roomForm?.addEventListener("submit", event => {
+      event.preventDefault();
+      addRoom();
+    });
 
-  if ('serviceWorker' in navigator && location.protocol !== 'file:') {
-    window.addEventListener('load', () => {
-      navigator.serviceWorker.register('./sw.js').catch(err => {
-        console.error('Service Worker 등록 실패:', err);
+    refs.attendeeForm?.addEventListener("submit", event => {
+      event.preventDefault();
+      addAttendee();
+    });
+
+    refs.roomList?.addEventListener("click", event => {
+      const btn = event.target.closest("[data-remove-room]");
+      if (!btn) return;
+      const roomId = btn.getAttribute("data-remove-room");
+      if (!roomId) return;
+      removeRoom(roomId);
+    });
+
+    refs.attendeeList?.addEventListener("click", event => {
+      const btn = event.target.closest("[data-remove-attendee]");
+      if (!btn) return;
+      const attendeeId = btn.getAttribute("data-remove-attendee");
+      if (!attendeeId) return;
+      removeAttendee(attendeeId);
+    });
+
+    refs.roomNameInput?.addEventListener("input", clearResults);
+    refs.roomCapacityInput?.addEventListener("input", clearResults);
+    refs.attendeeNameInput?.addEventListener("input", clearResults);
+    refs.attendeeHandicapInput?.addEventListener("input", clearResults);
+    refs.bulkTextarea?.addEventListener("input", clearResults);
+  }
+
+  /* =========================
+   * PWA / 설치 / SW
+   * ========================= */
+
+  function setupPwaInstall() {
+    window.addEventListener("beforeinstallprompt", event => {
+      event.preventDefault();
+      deferredPrompt = event;
+      if (refs.installBtn) refs.installBtn.hidden = false;
+    });
+
+    refs.installBtn?.addEventListener("click", async () => {
+      if (!deferredPrompt) return;
+      deferredPrompt.prompt();
+      await deferredPrompt.userChoice;
+      deferredPrompt = null;
+      if (refs.installBtn) refs.installBtn.hidden = true;
+    });
+
+    window.addEventListener("appinstalled", () => {
+      deferredPrompt = null;
+      if (refs.installBtn) refs.installBtn.hidden = true;
+    });
+  }
+
+  function registerServiceWorker() {
+    if (!("serviceWorker" in navigator)) return;
+
+    window.addEventListener("load", () => {
+      navigator.serviceWorker.register("./sw.js").catch(err => {
+        console.error("SW 등록 실패:", err);
       });
     });
   }
 
-  window.removeRoom = removeRoom;
-  window.removePerson = removePerson;
-  window.removeFromDB = removeFromDB;
-  window.addPersonFromDB = addPersonFromDB;
-</script>
+  /* =========================
+   * 초기화
+   * ========================= */
+
+  function exposeGlobals() {
+    window.addRoom = addRoom;
+    window.addAttendee = addAttendee;
+    window.addBulkAttendees = addBulkAttendees;
+    window.drawRandom = drawRandom;
+    window.drawHandicap = drawHandicap;
+    window.clearRooms = clearRooms;
+    window.clearAttendees = clearAttendees;
+    window.clearAll = clearAll;
+    window.removeRoom = removeRoom;
+    window.removeAttendee = removeAttendee;
+  }
+
+  function init() {
+    cacheRefs();
+    loadState();
+    bindEvents();
+    renderRooms();
+    renderAttendees();
+    updateStats();
+    clearResults();
+    setupPwaInstall();
+    registerServiceWorker();
+    exposeGlobals();
+  }
+
+  document.addEventListener("DOMContentLoaded", init);
+})();
