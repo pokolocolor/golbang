@@ -1,19 +1,26 @@
 {
-  "name": "스크린골프 방배정 앱",
+  "name": "골방 - 스크린골프 방배정 앱",
   "short_name": "골방",
-  "description": "골방 · 스크린골프 모임용 방배정 및 핸디 균형 배정 도구",
+  "description": "스크린골프 모임을 위한 방배정 앱. 방 등록, 참석자 등록, 랜덤 배정, 핸디 균형 배정을 간편하게 사용할 수 있습니다.",
   "lang": "ko",
   "start_url": "./index.html",
   "scope": "./",
   "display": "standalone",
   "orientation": "portrait",
-  "background_color": "#17352f",
-  "theme_color": "#17352f",
+  "background_color": "#08131f",
+  "theme_color": "#0f2a43",
   "icons": [
     {
       "src": "./icon.svg",
       "sizes": "any",
-      "type": "image/svg+xml"
+      "type": "image/svg+xml",
+      "purpose": "any"
+    },
+    {
+      "src": "./icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "maskable"
     }
   ]
 }
